@@ -13,16 +13,11 @@
 </head>
 <body>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-
   <section id="authView" class="auth-shell">
     <div class="auth-card glass">
       <div class="brand-row"><div class="brand-mark">MP</div><div><span class="eyebrow">FINANCE OS</span><h1>Meu Patrimônio</h1></div></div>
-      <p class="muted auth-copy">Seu cockpit privado de patrimônio, fluxo de caixa e liberdade financeira.</p>
-      <form id="loginForm" autocomplete="on">
-        <label>E-mail<input id="email" type="email" autocomplete="username" required /></label>
-        <label>Senha<input id="password" type="password" autocomplete="current-password" required /></label>
-        <button type="submit" class="primary">Entrar no cockpit</button>
-      </form>
+      <p class="muted auth-copy">Patrimônio, orçamento, metas e agenda financeira em um único cockpit.</p>
+      <form id="loginForm" autocomplete="on"><label>E-mail<input id="email" type="email" autocomplete="username" required /></label><label>Senha<input id="password" type="password" autocomplete="current-password" required /></label><button type="submit" class="primary">Entrar no cockpit</button></form>
       <button id="resetPasswordBtn" class="link-button" type="button">Esqueci minha senha</button>
       <div class="security-pill">🔒 Firebase Auth + dados isolados por usuário</div>
     </div>
@@ -30,112 +25,49 @@
 
   <div id="appView" class="app hidden">
     <header class="topbar">
-      <div class="topbar-brand"><div class="brand-mark small">MP</div><div><small id="greeting" class="muted">Cockpit financeiro</small><h1>Meu Patrimônio</h1></div></div>
-      <div class="topbar-actions"><div id="levelPill" class="level-pill">Nível 1</div><button id="logoutBtn" class="icon-btn" aria-label="Sair" title="Sair">↪</button></div>
+      <div class="topbar-brand"><div class="brand-mark small">MP</div><div><small class="muted">Cockpit financeiro</small><h1>Meu Patrimônio</h1></div></div>
+      <div class="topbar-actions"><button id="exportExcelBtn" class="ghost-btn">Exportar Excel</button><div id="levelPill" class="level-pill">Nível 1</div><button id="logoutBtn" class="icon-btn" aria-label="Sair">↪</button></div>
     </header>
 
     <main>
       <section id="dashboardSection" class="page active">
-        <div class="month-row">
-          <button id="prevMonth" class="icon-btn" aria-label="Mês anterior">‹</button>
-          <button id="monthLabel" class="month-button"></button>
-          <button id="nextMonth" class="icon-btn" aria-label="Próximo mês">›</button>
-        </div>
-
+        <div class="month-row"><button id="prevMonth" class="icon-btn">‹</button><button id="monthLabel" class="month-button"></button><button id="nextMonth" class="icon-btn">›</button></div>
         <section class="command-grid">
-          <article class="networth-card spotlight">
-            <div class="card-kicker">PATRIMÔNIO LÍQUIDO</div>
-            <strong id="netWorth">R$ 0,00</strong>
-            <div class="networth-foot"><span id="netWorthContext">Ativos menos dívidas</span><span id="freedomBadge" class="status-badge">0% da liberdade</span></div>
-          </article>
-          <article class="score-card glass">
-            <div class="score-ring" id="scoreRing"><div><strong id="financeScore">0</strong><small>/100</small></div></div>
-            <div class="score-copy"><span class="card-kicker">SCORE FINANCEIRO</span><h3 id="scoreLabel">Iniciando</h3><p id="scoreHint" class="muted">Cadastre seus dados para gerar o score.</p></div>
-          </article>
+          <article class="networth-card spotlight"><div class="card-kicker">PATRIMÔNIO LÍQUIDO</div><strong id="netWorth">R$ 0,00</strong><div class="networth-foot"><span id="netWorthContext">Ativos menos dívidas</span><span id="freedomBadge" class="status-badge">0% da liberdade</span></div></article>
+          <article class="score-card glass"><div class="score-ring" id="scoreRing"><div><strong id="financeScore">0</strong><small>/100</small></div></div><div class="score-copy"><span class="card-kicker">SCORE FINANCEIRO</span><h3 id="scoreLabel">Iniciando</h3><p id="scoreHint" class="muted">Cadastre metas para elevar a precisão.</p></div></article>
+        </section>
+        <section class="metric-strip"><article class="mini-metric"><span>Saldo do mês</span><strong id="monthBalance">R$ 0,00</strong><small id="balanceTrend">—</small></article><article class="mini-metric"><span>Taxa de poupança</span><strong id="savingRate">0%</strong><small id="savingStatus">Meta ≥ 20%</small></article><article class="mini-metric"><span>Reserva</span><strong id="reserveMonths">0,0 meses</strong><small id="reserveValue">R$ 0,00</small></article><article class="mini-metric"><span>Dívidas</span><strong id="debtValue">R$ 0,00</strong><small id="debtRatio">0% dos ativos</small></article></section>
+
+        <section class="dashboard-grid tamagotchi-grid">
+          <article class="panel pet-card"><div class="pet-scene"><div id="petAvatar" class="pet-avatar">🐷</div><div class="pet-shadow"></div></div><div class="pet-copy"><div class="panel-head"><div><span class="card-kicker">PATRIMÔNIO PET</span><h2 id="petName">Cofrinho</h2></div><span id="petHealthBadge" class="health-badge">Saúde 0%</span></div><p id="petMessage" class="muted">Defina suas metas para eu começar a cuidar do seu dinheiro.</p><div class="health-track"><i id="petHealthBar"></i></div><div id="petVitals" class="pet-vitals"></div></div></article>
+          <article class="panel goal-card"><div class="panel-head"><div><span class="card-kicker">METAS DO MÊS</span><h2>Disciplina diária</h2></div><button class="text-btn" data-go="planning">Editar metas</button></div><div class="goal-grid"><div><span>Sobra mínima</span><strong id="surplusGoalStatus">—</strong><small id="surplusGoalDetail">Defina no planejamento</small></div><div><span>Gasto diário</span><strong id="dailyGoalStatus">—</strong><small id="dailyGoalDetail">Defina no planejamento</small></div></div></article>
         </section>
 
-        <section class="metric-strip">
-          <article class="mini-metric"><span>Saldo do mês</span><strong id="monthBalance">R$ 0,00</strong><small id="balanceTrend">—</small></article>
-          <article class="mini-metric"><span>Taxa de poupança</span><strong id="savingRate">0%</strong><small id="savingStatus">Meta recomendada ≥ 20%</small></article>
-          <article class="mini-metric"><span>Reserva</span><strong id="reserveMonths">0,0 meses</strong><small id="reserveValue">R$ 0,00</small></article>
-          <article class="mini-metric"><span>Dívidas</span><strong id="debtValue">R$ 0,00</strong><small id="debtRatio">0% dos ativos</small></article>
-        </section>
-
-        <section class="dashboard-grid two-one">
-          <article class="panel chart-card">
-            <div class="panel-head"><div><span class="card-kicker">FLUXO DE CAIXA</span><h2>Receitas x despesas</h2></div><span class="subtle-pill">6 meses</span></div>
-            <div id="cashflowChart" class="chart-wrap"></div>
-            <div class="chart-legend"><span><i class="dot income-dot"></i>Receitas</span><span><i class="dot expense-dot"></i>Despesas</span></div>
-          </article>
-          <article class="panel freedom-card">
-            <div class="panel-head"><div><span class="card-kicker">LIBERDADE FINANCEIRA</span><h2>Progresso</h2></div></div>
-            <div id="freedomRing" class="freedom-ring"><div><strong id="freedomPercent">0%</strong><small>concluído</small></div></div>
-            <div class="freedom-stats"><div><span>Meta patrimonial</span><strong id="freedomTarget">—</strong></div><div><span>Falta</span><strong id="freedomGap">—</strong></div></div>
-          </article>
-        </section>
-
-        <section class="dashboard-grid half-half">
-          <article class="panel">
-            <div class="panel-head"><div><span class="card-kicker">COMPOSIÇÃO</span><h2>Despesas do mês</h2></div><button class="text-btn" data-go="transactions">Detalhar</button></div>
-            <div class="donut-layout"><div id="expenseDonut" class="donut"><div><strong id="expenseTotal">R$ 0</strong><small>total</small></div></div><div id="categoryLegend" class="category-legend"></div></div>
-          </article>
-          <article class="panel">
-            <div class="panel-head"><div><span class="card-kicker">INTELIGÊNCIA</span><h2>Insights do mês</h2></div><span class="ai-chip">ANÁLISE</span></div>
-            <div id="insightsList" class="insights-list"></div>
-          </article>
-        </section>
-
-        <section class="dashboard-grid half-half">
-          <article class="panel game-panel">
-            <div class="panel-head"><div><span class="card-kicker">MISSÕES</span><h2>Próximos marcos</h2></div><span id="xpPill" class="xp-pill">0 XP</span></div>
-            <div id="missionsList" class="missions-list"></div>
-          </article>
-          <article class="panel">
-            <div class="panel-head"><div><span class="card-kicker">PROJEÇÃO</span><h2>Seu patrimônio no tempo</h2></div><button class="text-btn" data-go="planning">Premissas</button></div>
-            <div id="projectionChart" class="chart-wrap projection-chart"></div>
-            <div id="projectionSummary" class="projection-summary"></div>
-          </article>
-        </section>
-
-        <article class="panel">
-          <div class="panel-head"><div><span class="card-kicker">MOVIMENTAÇÕES</span><h2>Últimos lançamentos</h2></div><button class="text-btn" data-go="transactions">Ver todos</button></div>
-          <div id="recentTransactions" class="list empty-state">Nenhum lançamento ainda.</div>
-        </article>
+        <section class="dashboard-grid two-one"><article class="panel"><div class="panel-head"><div><span class="card-kicker">FLUXO DE CAIXA</span><h2>Receitas x despesas</h2></div><span class="subtle-pill">6 meses</span></div><div id="cashflowChart" class="chart-wrap"></div><div class="chart-legend"><span><i class="dot income-dot"></i>Receitas</span><span><i class="dot expense-dot"></i>Despesas</span></div></article><article class="panel freedom-card"><div class="panel-head"><div><span class="card-kicker">LIBERDADE FINANCEIRA</span><h2>Progresso</h2></div></div><div id="freedomRing" class="freedom-ring"><div><strong id="freedomPercent">0%</strong><small>concluído</small></div></div><div class="freedom-stats"><div><span>Meta</span><strong id="freedomTarget">—</strong></div><div><span>Falta</span><strong id="freedomGap">—</strong></div></div></article></section>
+        <section class="dashboard-grid half-half"><article class="panel"><div class="panel-head"><div><span class="card-kicker">COMPOSIÇÃO</span><h2>Despesas do mês</h2></div><button class="text-btn" data-go="transactions">Detalhar</button></div><div class="donut-layout"><div id="expenseDonut" class="donut"><div><strong id="expenseTotal">R$ 0</strong><small>total</small></div></div><div id="categoryLegend" class="category-legend"></div></div></article><article class="panel"><div class="panel-head"><div><span class="card-kicker">INTELIGÊNCIA</span><h2>Insights do mês</h2></div><span class="ai-chip">ANÁLISE</span></div><div id="insightsList" class="insights-list"></div></article></section>
+        <section class="dashboard-grid half-half"><article class="panel game-panel"><div class="panel-head"><div><span class="card-kicker">MISSÕES</span><h2>Próximos marcos</h2></div><span id="xpPill" class="xp-pill">0 XP</span></div><div id="missionsList" class="missions-list"></div></article><article class="panel"><div class="panel-head"><div><span class="card-kicker">AGENDA</span><h2>Próximos compromissos</h2></div><button class="text-btn" data-go="agenda">Abrir agenda</button></div><div id="upcomingList" class="agenda-mini"></div></article></section>
+        <article class="panel"><div class="panel-head"><div><span class="card-kicker">MOVIMENTAÇÕES</span><h2>Últimos lançamentos</h2></div><button class="text-btn" data-go="transactions">Ver todos</button></div><div id="recentTransactions" class="list empty-state">Nenhum lançamento.</div></article>
       </section>
 
-      <section id="transactionsSection" class="page">
-        <div class="section-hero"><div><span class="card-kicker">MOVIMENTAÇÕES</span><h2>Lançamentos</h2><p class="muted">Registre em segundos e acompanhe o impacto no mês.</p></div><button id="openTransactionBtn" class="primary compact">+ Novo lançamento</button></div>
-        <div class="filters glass"><select id="txTypeFilter"><option value="all">Todos</option><option value="expense">Despesas</option><option value="income">Receitas</option></select><input id="txSearch" type="search" placeholder="Buscar descrição ou categoria" /></div>
-        <div id="transactionsList" class="list panel empty-state">Nenhum lançamento.</div>
-      </section>
+      <section id="transactionsSection" class="page"><div class="section-hero"><div><span class="card-kicker">MOVIMENTAÇÕES</span><h2>Lançamentos</h2><p class="muted">Registre em segundos e acompanhe o impacto no mês.</p></div><button id="openTransactionBtn" class="primary compact">+ Novo lançamento</button></div><div class="filters glass"><select id="txTypeFilter"><option value="all">Todos</option><option value="expense">Despesas</option><option value="income">Receitas</option></select><input id="txSearch" type="search" placeholder="Buscar descrição ou categoria" /></div><div id="transactionsList" class="list panel empty-state">Nenhum lançamento.</div></section>
 
-      <section id="patrimonySection" class="page">
-        <div class="section-hero"><div><span class="card-kicker">BALANÇO PESSOAL</span><h2>Patrimônio</h2><p class="muted">Ativos, reserva de emergência e obrigações em um só lugar.</p></div><button id="openPositionBtn" class="primary compact">+ Nova posição</button></div>
-        <div class="metric-strip three"><article class="mini-metric"><span>Ativos</span><strong id="assetsTotal">R$ 0,00</strong><small>Inclui reserva</small></article><article class="mini-metric"><span>Dívidas</span><strong id="debtsTotal">R$ 0,00</strong><small>Saldo devedor</small></article><article class="mini-metric"><span>Patrimônio líquido</span><strong id="patrimonyNetWorth">R$ 0,00</strong><small>Ativos − dívidas</small></article></div>
-        <article class="panel"><div class="panel-head"><div><span class="card-kicker">POSIÇÕES</span><h2>Mapa patrimonial</h2></div></div><div id="positionsList" class="list empty-state">Nenhuma posição cadastrada.</div></article>
-      </section>
+      <section id="annualSection" class="page"><div class="section-hero"><div><span class="card-kicker">VISÃO ANUAL</span><h2>Raio-X do ano</h2><p class="muted">Fluxo, resultado e concentração de gastos mês a mês.</p></div><div class="year-picker"><button id="prevYear" class="icon-btn">‹</button><strong id="yearLabel"></strong><button id="nextYear" class="icon-btn">›</button></div></div><section class="metric-strip four"><article class="mini-metric"><span>Receitas no ano</span><strong id="annualIncome">R$ 0</strong></article><article class="mini-metric"><span>Despesas no ano</span><strong id="annualExpense">R$ 0</strong></article><article class="mini-metric"><span>Resultado</span><strong id="annualBalance">R$ 0</strong></article><article class="mini-metric"><span>Poupança anual</span><strong id="annualSavingRate">0%</strong></article></section><article class="panel"><div class="panel-head"><div><span class="card-kicker">12 MESES</span><h2>Receitas x despesas</h2></div><button id="exportExcelAnnualBtn" class="ghost-btn">Exportar Excel</button></div><div id="annualChart" class="chart-wrap tall"></div></article><section class="dashboard-grid half-half"><article class="panel"><span class="card-kicker">CATEGORIAS</span><h2>Maiores gastos do ano</h2><div id="annualCategories" class="rank-list"></div></article><article class="panel"><span class="card-kicker">MESES</span><h2>Performance mensal</h2><div id="annualMonths" class="month-performance"></div></article></section></section>
 
-      <section id="planningSection" class="page">
-        <div class="section-hero"><div><span class="card-kicker">ESTRATÉGIA</span><h2>Planejamento</h2><p class="muted">Defina premissas para transformar patrimônio em liberdade financeira.</p></div></div>
-        <form id="planningForm" class="panel form-grid">
-          <label>Meta mensal de aporte<input id="monthlyContributionGoal" type="number" min="0" step="100" /></label>
-          <label>Gasto mensal desejado na independência<input id="financialFreedomMonthlyCost" type="number" min="0" step="100" /></label>
-          <label>Rentabilidade real anual esperada (%)<input id="realReturn" type="number" min="0" max="20" step="0.1" value="5" /></label>
-          <label>Reserva-alvo (meses)<input id="reserveTargetMonths" type="number" min="1" max="24" step="1" value="6" /></label>
-          <button class="primary" type="submit">Salvar estratégia</button>
-        </form>
-        <section class="dashboard-grid half-half"><article class="panel"><span class="card-kicker">CENÁRIOS</span><h2>Patrimônio projetado</h2><div id="projectionGrid" class="projection-grid"></div></article><article class="panel"><span class="card-kicker">DIAGNÓSTICO</span><h2>Leitura estratégica</h2><div id="diagnosis" class="diagnosis"></div></article></section>
-      </section>
+      <section id="agendaSection" class="page"><div class="section-hero"><div><span class="card-kicker">AUTOMAÇÃO</span><h2>Agenda financeira</h2><p class="muted">Contas recorrentes e compromissos futuros que viram lançamentos automaticamente.</p></div><div class="button-row"><button id="openRecurringBtn" class="ghost-btn">+ Recorrente</button><button id="openScheduledBtn" class="primary compact">+ Agendada</button></div></div><div id="automationNotice" class="notice hidden"></div><section class="dashboard-grid half-half"><article class="panel"><div class="panel-head"><div><span class="card-kicker">RECORRENTES</span><h2>Contas mensais</h2></div><span id="recurringCount" class="subtle-pill">0 ativas</span></div><div id="recurringList" class="agenda-list"></div></article><article class="panel"><div class="panel-head"><div><span class="card-kicker">AGENDADAS</span><h2>IPVA, IPTU e eventos</h2></div><span id="scheduledCount" class="subtle-pill">0 futuras</span></div><div id="scheduledList" class="agenda-list"></div></article></section></section>
+
+      <section id="patrimonySection" class="page"><div class="section-hero"><div><span class="card-kicker">BALANÇO PESSOAL</span><h2>Patrimônio</h2><p class="muted">Ativos, reserva e obrigações em um só lugar.</p></div><button id="openPositionBtn" class="primary compact">+ Nova posição</button></div><div class="metric-strip three"><article class="mini-metric"><span>Ativos</span><strong id="assetsTotal">R$ 0</strong></article><article class="mini-metric"><span>Dívidas</span><strong id="debtsTotal">R$ 0</strong></article><article class="mini-metric"><span>Patrimônio líquido</span><strong id="patrimonyNetWorth">R$ 0</strong></article></div><article class="panel"><div id="positionsList" class="list empty-state">Nenhuma posição.</div></article></section>
+
+      <section id="planningSection" class="page"><div class="section-hero"><div><span class="card-kicker">ESTRATÉGIA</span><h2>Planejamento & metas</h2><p class="muted">Estas metas alimentam o score, as missões e a saúde do seu Cofrinho.</p></div></div><form id="planningForm" class="panel form-grid"><label>Meta mensal de aporte<input id="monthlyContributionGoal" type="number" min="0" step="100" /></label><label>Sobra mínima mensal<input id="monthlySurplusGoal" type="number" min="0" step="50" /></label><label>Limite médio de gasto diário<input id="dailySpendGoal" type="number" min="0" step="10" /></label><label>Gasto mensal na independência<input id="financialFreedomMonthlyCost" type="number" min="0" step="100" /></label><label>Rentabilidade real anual (%)<input id="realReturn" type="number" min="0" max="20" step="0.1" value="5" /></label><label>Reserva-alvo (meses)<input id="reserveTargetMonths" type="number" min="1" max="24" step="1" value="6" /></label><button class="primary" type="submit">Salvar estratégia</button></form><section class="dashboard-grid half-half"><article class="panel"><span class="card-kicker">CENÁRIOS</span><h2>Patrimônio projetado</h2><div id="projectionGrid" class="projection-grid"></div></article><article class="panel"><span class="card-kicker">DIAGNÓSTICO</span><h2>Leitura estratégica</h2><div id="diagnosis" class="diagnosis"></div></article></section></section>
     </main>
 
-    <button id="quickAddBtn" class="fab" aria-label="Novo lançamento">+</button>
-    <nav class="bottom-nav" aria-label="Navegação principal"><button class="nav-item active" data-page="dashboard"><span>⌂</span><small>Início</small></button><button class="nav-item" data-page="transactions"><span>⇄</span><small>Lançar</small></button><button class="nav-item" data-page="patrimony"><span>◇</span><small>Patrimônio</small></button><button class="nav-item" data-page="planning"><span>◎</span><small>Planejar</small></button></nav>
+    <button id="quickAddBtn" class="fab">+</button>
+    <nav class="bottom-nav"><button class="nav-item active" data-page="dashboard"><span>⌂</span><small>Início</small></button><button class="nav-item" data-page="transactions"><span>⇄</span><small>Lançar</small></button><button class="nav-item" data-page="annual"><span>▥</span><small>Ano</small></button><button class="nav-item" data-page="agenda"><span>◷</span><small>Agenda</small></button><button class="nav-item" data-page="patrimony"><span>◇</span><small>Patrim.</small></button><button class="nav-item" data-page="planning"><span>◎</span><small>Metas</small></button></nav>
   </div>
 
-  <dialog id="transactionDialog"><form id="transactionForm" method="dialog" class="sheet-form"><div class="dialog-head"><div><span class="card-kicker">REGISTRO RÁPIDO</span><h2>Novo lançamento</h2></div><button type="button" class="icon-btn close-dialog">×</button></div><div class="segmented"><button type="button" class="selected" data-tx-type="expense">Despesa</button><button type="button" data-tx-type="income">Receita</button></div><label>Valor<input id="transactionAmount" inputmode="decimal" type="number" min="0.01" step="0.01" required /></label><input id="transactionType" type="hidden" value="expense" /><label>Categoria<select id="transactionCategory" required></select></label><label>Descrição<input id="transactionDescription" maxlength="80" placeholder="Ex.: Mercado semanal" /></label><label>Data<input id="transactionDate" type="date" required /></label><label class="check-row"><input id="transactionRecurring" type="checkbox" /> Lançamento recorrente</label><button class="primary" type="submit">Salvar lançamento</button></form></dialog>
-
-  <dialog id="positionDialog"><form id="positionForm" method="dialog" class="sheet-form"><div class="dialog-head"><div><span class="card-kicker">BALANÇO</span><h2>Nova posição</h2></div><button type="button" class="icon-btn close-dialog">×</button></div><label>Tipo<select id="positionType"><option value="asset">Ativo</option><option value="reserve">Reserva de emergência</option><option value="debt">Dívida</option></select></label><label>Nome<input id="positionName" maxlength="60" required placeholder="Ex.: Tesouro Selic" /></label><label>Valor atual<input id="positionValue" type="number" min="0" step="0.01" inputmode="decimal" required /></label><button class="primary" type="submit">Salvar posição</button></form></dialog>
-
+  <dialog id="transactionDialog"><form id="transactionForm" method="dialog" class="sheet-form"><div class="dialog-head"><div><span class="card-kicker">REGISTRO RÁPIDO</span><h2>Novo lançamento</h2></div><button type="button" class="icon-btn close-dialog">×</button></div><div class="segmented"><button type="button" class="selected" data-tx-type="expense">Despesa</button><button type="button" data-tx-type="income">Receita</button></div><input id="transactionType" type="hidden" value="expense" /><label>Valor<input id="transactionAmount" type="number" min="0.01" step="0.01" inputmode="decimal" required /></label><label>Categoria<select id="transactionCategory" required></select></label><label>Descrição<input id="transactionDescription" maxlength="80" /></label><label>Data<input id="transactionDate" type="date" required /></label><label class="check-row"><input id="transactionRecurring" type="checkbox" /> Transformar em conta recorrente mensal</label><button class="primary" type="submit">Salvar lançamento</button></form></dialog>
+  <dialog id="positionDialog"><form id="positionForm" method="dialog" class="sheet-form"><div class="dialog-head"><h2>Nova posição</h2><button type="button" class="icon-btn close-dialog">×</button></div><label>Tipo<select id="positionType"><option value="asset">Ativo</option><option value="reserve">Reserva de emergência</option><option value="debt">Dívida</option></select></label><label>Nome<input id="positionName" maxlength="60" required /></label><label>Valor atual<input id="positionValue" type="number" min="0" step="0.01" required /></label><button class="primary" type="submit">Salvar posição</button></form></dialog>
+  <dialog id="recurringDialog"><form id="recurringForm" method="dialog" class="sheet-form"><input id="recurringEditId" type="hidden" /><div class="dialog-head"><div><span class="card-kicker">RECORRÊNCIA</span><h2 id="recurringDialogTitle">Nova conta recorrente</h2></div><button type="button" class="icon-btn close-dialog">×</button></div><label>Nome<input id="recurringName" maxlength="60" required /></label><label>Tipo<select id="recurringType"><option value="expense">Despesa</option><option value="income">Receita</option></select></label><label>Valor<input id="recurringAmount" type="number" min="0.01" step="0.01" required /></label><label>Categoria<select id="recurringCategory" required></select></label><label>Dia do mês<input id="recurringDay" type="number" min="1" max="31" required /></label><label>Início<input id="recurringStart" type="date" required /></label><label>Fim opcional<input id="recurringEnd" type="date" /></label><label class="check-row"><input id="recurringActive" type="checkbox" checked /> Ativa</label><button class="primary" type="submit">Salvar recorrência</button></form></dialog>
+  <dialog id="scheduledDialog"><form id="scheduledForm" method="dialog" class="sheet-form"><input id="scheduledEditId" type="hidden" /><div class="dialog-head"><div><span class="card-kicker">COMPROMISSO</span><h2 id="scheduledDialogTitle">Nova conta agendada</h2></div><button type="button" class="icon-btn close-dialog">×</button></div><label>Nome<input id="scheduledName" maxlength="60" required placeholder="Ex.: IPVA" /></label><label>Tipo<select id="scheduledType"><option value="expense">Despesa</option><option value="income">Receita</option></select></label><label>Valor<input id="scheduledAmount" type="number" min="0.01" step="0.01" required /></label><label>Categoria<select id="scheduledCategory" required></select></label><label>Vencimento<input id="scheduledDue" type="date" required /></label><label>Frequência<select id="scheduledFrequency"><option value="once">Uma vez</option><option value="annual">Anual</option></select></label><button class="primary" type="submit">Salvar compromisso</button></form></dialog>
   <script type="module" src="app.js"></script>
 </body>
 </html>
