@@ -1,0 +1,108 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAuthorizedEmail() {
+      return signedIn()
+        && request.auth.token.email == 'luizcanalli@unochapeco.edu.br';
+    }
+
+    function owns(userId) {
+      return isAuthorizedEmail() && request.auth.uid == userId;
+    }
+
+    function validTransaction() {
+      return request.resource.data.keys().hasOnly([
+          'type', 'amount', 'category', 'description', 'date', 'recurring', 'createdAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'type', 'amount', 'category', 'description', 'date', 'recurring', 'createdAt'
+        ])
+        && request.resource.data.type in ['income', 'expense']
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0
+        && request.resource.data.amount < 100000000
+        && request.resource.data.date is string
+        && request.resource.data.date.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && request.resource.data.category is string
+        && request.resource.data.category.size() > 0
+        && request.resource.data.category.size() <= 40
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 80
+        && request.resource.data.recurring is bool
+        && request.resource.data.createdAt is timestamp;
+    }
+
+    function validPosition() {
+      return request.resource.data.keys().hasOnly([
+          'type', 'name', 'value', 'createdAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'type', 'name', 'value', 'createdAt'
+        ])
+        && request.resource.data.type in ['asset', 'reserve', 'debt']
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 60
+        && request.resource.data.value is number
+        && request.resource.data.value >= 0
+        && request.resource.data.value < 1000000000
+        && request.resource.data.createdAt is timestamp;
+    }
+
+    function validPlanning() {
+      return request.resource.data.keys().hasOnly([
+          'monthlyContributionGoal',
+          'financialFreedomMonthlyCost',
+          'realReturn',
+          'reserveTargetMonths',
+          'updatedAt'
+        ])
+        && request.resource.data.monthlyContributionGoal is number
+        && request.resource.data.monthlyContributionGoal >= 0
+        && request.resource.data.monthlyContributionGoal < 10000000
+        && request.resource.data.financialFreedomMonthlyCost is number
+        && request.resource.data.financialFreedomMonthlyCost >= 0
+        && request.resource.data.financialFreedomMonthlyCost < 10000000
+        && request.resource.data.realReturn is number
+        && request.resource.data.realReturn >= 0
+        && request.resource.data.realReturn <= 20
+        && request.resource.data.reserveTargetMonths is number
+        && request.resource.data.reserveTargetMonths >= 1
+        && request.resource.data.reserveTargetMonths <= 24
+        && request.resource.data.updatedAt is timestamp;
+    }
+
+    match /users/{userId} {
+      allow read: if owns(userId);
+      allow create: if owns(userId)
+        && request.resource.data.keys().hasOnly(['createdAt', 'email'])
+        && request.resource.data.email == 'luizcanalli@unochapeco.edu.br'
+        && request.resource.data.createdAt is timestamp;
+      allow update, delete: if false;
+
+      match /transactions/{txId} {
+        allow read, delete: if owns(userId);
+        allow create, update: if owns(userId) && validTransaction();
+      }
+
+      match /positions/{positionId} {
+        allow read, delete: if owns(userId);
+        allow create, update: if owns(userId) && validPosition();
+      }
+
+      match /config/planning {
+        allow read: if owns(userId);
+        allow create, update: if owns(userId) && validPlanning();
+        allow delete: if false;
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
