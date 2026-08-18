@@ -1,99 +1,84 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() {
-      return request.auth != null;
-    }
-
-    function owns(userId) {
-      return signedIn() && request.auth.uid == userId;
-    }
+    function signedIn() { return request.auth != null; }
+    function owns(userId) { return signedIn() && request.auth.uid == userId; }
+    function validDate(v) { return v is string && v.matches('^\\d{4}-\\d{2}-\\d{2}$'); }
+    function validMoney(v) { return v is number && v >= 0 && v < 1000000000; }
 
     function validTransaction() {
-      return request.resource.data.keys().hasOnly([
-          'type', 'amount', 'category', 'description', 'date', 'recurring', 'createdAt'
-        ])
-        && request.resource.data.keys().hasAll([
-          'type', 'amount', 'category', 'description', 'date', 'recurring', 'createdAt'
-        ])
-        && request.resource.data.type in ['income', 'expense']
-        && request.resource.data.amount is number
-        && request.resource.data.amount > 0
-        && request.resource.data.amount < 100000000
-        && request.resource.data.date is string
-        && request.resource.data.date.matches('^\\d{4}-\\d{2}-\\d{2}$')
-        && request.resource.data.category is string
-        && request.resource.data.category.size() > 0
-        && request.resource.data.category.size() <= 40
-        && request.resource.data.description is string
-        && request.resource.data.description.size() <= 80
+      return request.resource.data.keys().hasOnly(['type','amount','category','description','date','recurring','sourceType','sourceId','createdAt'])
+        && request.resource.data.keys().hasAll(['type','amount','category','description','date','recurring','createdAt'])
+        && request.resource.data.type in ['income','expense']
+        && request.resource.data.amount is number && request.resource.data.amount > 0 && request.resource.data.amount < 100000000
+        && validDate(request.resource.data.date)
+        && request.resource.data.category is string && request.resource.data.category.size() > 0 && request.resource.data.category.size() <= 40
+        && request.resource.data.description is string && request.resource.data.description.size() <= 80
         && request.resource.data.recurring is bool
+        && (!request.resource.data.keys().hasAny(['sourceType']) || request.resource.data.sourceType in ['recurring','scheduled'])
+        && (!request.resource.data.keys().hasAny(['sourceId']) || (request.resource.data.sourceId is string && request.resource.data.sourceId.size() <= 128))
         && request.resource.data.createdAt is timestamp;
     }
 
     function validPosition() {
-      return request.resource.data.keys().hasOnly(['type', 'name', 'value', 'createdAt'])
-        && request.resource.data.keys().hasAll(['type', 'name', 'value', 'createdAt'])
-        && request.resource.data.type in ['asset', 'reserve', 'debt']
-        && request.resource.data.name is string
-        && request.resource.data.name.size() > 0
-        && request.resource.data.name.size() <= 60
-        && request.resource.data.value is number
-        && request.resource.data.value >= 0
-        && request.resource.data.value < 1000000000
+      return request.resource.data.keys().hasOnly(['type','name','value','createdAt'])
+        && request.resource.data.keys().hasAll(['type','name','value','createdAt'])
+        && request.resource.data.type in ['asset','reserve','debt']
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 60
+        && validMoney(request.resource.data.value)
         && request.resource.data.createdAt is timestamp;
     }
 
     function validPlanning() {
-      return request.resource.data.keys().hasOnly([
-          'monthlyContributionGoal',
-          'financialFreedomMonthlyCost',
-          'realReturn',
-          'reserveTargetMonths',
-          'updatedAt'
-        ])
-        && request.resource.data.monthlyContributionGoal is number
-        && request.resource.data.monthlyContributionGoal >= 0
-        && request.resource.data.monthlyContributionGoal < 10000000
-        && request.resource.data.financialFreedomMonthlyCost is number
-        && request.resource.data.financialFreedomMonthlyCost >= 0
-        && request.resource.data.financialFreedomMonthlyCost < 10000000
-        && request.resource.data.realReturn is number
-        && request.resource.data.realReturn >= 0
-        && request.resource.data.realReturn <= 20
-        && request.resource.data.reserveTargetMonths is number
-        && request.resource.data.reserveTargetMonths >= 1
-        && request.resource.data.reserveTargetMonths <= 24
+      return request.resource.data.keys().hasOnly(['monthlyContributionGoal','monthlySurplusGoal','dailySpendGoal','financialFreedomMonthlyCost','realReturn','reserveTargetMonths','updatedAt'])
+        && validMoney(request.resource.data.monthlyContributionGoal)
+        && validMoney(request.resource.data.monthlySurplusGoal)
+        && validMoney(request.resource.data.dailySpendGoal)
+        && validMoney(request.resource.data.financialFreedomMonthlyCost)
+        && request.resource.data.realReturn is number && request.resource.data.realReturn >= 0 && request.resource.data.realReturn <= 20
+        && request.resource.data.reserveTargetMonths is number && request.resource.data.reserveTargetMonths >= 1 && request.resource.data.reserveTargetMonths <= 24
         && request.resource.data.updatedAt is timestamp;
+    }
+
+    function validRecurring() {
+      return request.resource.data.keys().hasOnly(['name','type','amount','category','description','dayOfMonth','startDate','endDate','active','createdAt','updatedAt'])
+        && request.resource.data.keys().hasAll(['name','type','amount','category','description','dayOfMonth','startDate','endDate','active','createdAt','updatedAt'])
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 60
+        && request.resource.data.type in ['income','expense']
+        && request.resource.data.amount is number && request.resource.data.amount > 0 && request.resource.data.amount < 100000000
+        && request.resource.data.category is string && request.resource.data.category.size() > 0 && request.resource.data.category.size() <= 40
+        && request.resource.data.description is string && request.resource.data.description.size() <= 80
+        && request.resource.data.dayOfMonth is number && request.resource.data.dayOfMonth >= 1 && request.resource.data.dayOfMonth <= 31
+        && validDate(request.resource.data.startDate)
+        && (request.resource.data.endDate == '' || validDate(request.resource.data.endDate))
+        && request.resource.data.active is bool
+        && request.resource.data.createdAt is timestamp && request.resource.data.updatedAt is timestamp;
+    }
+
+    function validScheduled() {
+      return request.resource.data.keys().hasOnly(['name','type','amount','category','description','dueDate','frequency','status','createdAt','updatedAt'])
+        && request.resource.data.keys().hasAll(['name','type','amount','category','description','dueDate','frequency','status','createdAt','updatedAt'])
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 60
+        && request.resource.data.type in ['income','expense']
+        && request.resource.data.amount is number && request.resource.data.amount > 0 && request.resource.data.amount < 100000000
+        && request.resource.data.category is string && request.resource.data.category.size() > 0 && request.resource.data.category.size() <= 40
+        && request.resource.data.description is string && request.resource.data.description.size() <= 80
+        && validDate(request.resource.data.dueDate)
+        && request.resource.data.frequency in ['once','annual']
+        && request.resource.data.status in ['active','posted','cancelled']
+        && request.resource.data.createdAt is timestamp && request.resource.data.updatedAt is timestamp;
     }
 
     match /users/{userId} {
       allow read: if owns(userId);
-      allow create: if owns(userId)
-        && request.resource.data.keys().hasOnly(['createdAt', 'email'])
-        && request.resource.data.email == request.auth.token.email
-        && request.resource.data.createdAt is timestamp;
+      allow create: if owns(userId) && request.resource.data.keys().hasOnly(['createdAt','email']) && request.resource.data.email == request.auth.token.email && request.resource.data.createdAt is timestamp;
       allow update, delete: if false;
-
-      match /transactions/{txId} {
-        allow read, delete: if owns(userId);
-        allow create, update: if owns(userId) && validTransaction();
-      }
-
-      match /positions/{positionId} {
-        allow read, delete: if owns(userId);
-        allow create, update: if owns(userId) && validPosition();
-      }
-
-      match /config/planning {
-        allow read: if owns(userId);
-        allow create, update: if owns(userId) && validPlanning();
-        allow delete: if false;
-      }
+      match /transactions/{txId} { allow read, delete: if owns(userId); allow create, update: if owns(userId) && validTransaction(); }
+      match /positions/{positionId} { allow read, delete: if owns(userId); allow create, update: if owns(userId) && validPosition(); }
+      match /config/planning { allow read: if owns(userId); allow create, update: if owns(userId) && validPlanning(); allow delete: if false; }
+      match /recurring/{recurringId} { allow read, delete: if owns(userId); allow create, update: if owns(userId) && validRecurring(); }
+      match /scheduled/{scheduledId} { allow read, delete: if owns(userId); allow create, update: if owns(userId) && validScheduled(); }
     }
-
-    match /{document=**} {
-      allow read, write: if false;
-    }
+    match /{document=**} { allow read, write: if false; }
   }
 }
