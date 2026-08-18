@@ -9,5 +9,5 @@ export const firebaseConfig = {
   appId: "1:457912347612:web:6413403bed3dd52809bd19"
 };
 
-// App Check será ativado após o primeiro teste funcional do domínio publicado.
-export const appCheckSiteKey = "";
+// Chave pública do site para Firebase App Check + reCAPTCHA Enterprise.
+export const appCheckSiteKey = "6Lfm8lwtAAAAAAbXI--eqSShT9hfmmj6ezeBQpnJ";
