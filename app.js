@@ -8,7 +8,6 @@ const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const currency = new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"});
 const monthFmt = new Intl.DateTimeFormat("pt-BR",{month:"long",year:"numeric"});
-const AUTHORIZED_EMAIL = "luizcanalli@unochapeco.edu.br";
 const categories = {
   expense:["Moradia","Mercado","Restaurantes","Transporte","Veículo","Saúde","Pets","Assinaturas","Lazer","Compras","Impostos","Seguros","Educação","Viagens","Outros"],
   income:["Salário","Benefícios","Renda extra","Investimentos","Reembolso","Venda","Outros"]
@@ -100,11 +99,9 @@ $$('.nav-item').forEach(n=>n.addEventListener('click',()=>switchPage(n.dataset.p
 document.addEventListener("click",async e=>{const tx=e.target.closest('[data-delete-tx]');if(tx&&confirm("Excluir este lançamento?")){await deleteDoc(userDoc("transactions",tx.dataset.deleteTx));await loadTransactions();renderAll();toast("Lançamento excluído");}const p=e.target.closest('[data-delete-position]');if(p&&confirm("Excluir esta posição?")){await deleteDoc(userDoc("positions",p.dataset.deletePosition));await loadPositions();renderAll();toast("Posição excluída");}});
 
 onAuthStateChanged(auth,async u=>{
-  if (u && (u.email || "").toLowerCase() !== AUTHORIZED_EMAIL) {
-    await signOut(auth);
-    toast("Acesso não autorizado");
-    return;
-  }
-  user=u;if(u){$("#authView").classList.add("hidden");$("#appView").classList.remove("hidden");$("#greeting").textContent=u.email||"Visão financeira";try{await loadAll();}catch(e){console.error(e);toast("Falha ao carregar seus dados");}}else{$("#appView").classList.add("hidden");$("#authView").classList.remove("hidden");}});
+  user=u;
+  if(u){$("#authView").classList.add("hidden");$("#appView").classList.remove("hidden");$("#greeting").textContent="Visão financeira";try{await loadAll();}catch(e){console.error(e);toast("Falha ao carregar seus dados");}}
+  else{$("#appView").classList.add("hidden");$("#authView").classList.remove("hidden");}
+});
 
 if("serviceWorker" in navigator) window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(console.error));
