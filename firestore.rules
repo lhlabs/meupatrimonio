@@ -5,13 +5,8 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isAuthorizedEmail() {
-      return signedIn()
-        && request.auth.token.email == 'luizcanalli@unochapeco.edu.br';
-    }
-
     function owns(userId) {
-      return isAuthorizedEmail() && request.auth.uid == userId;
+      return signedIn() && request.auth.uid == userId;
     }
 
     function validTransaction() {
@@ -37,12 +32,8 @@ service cloud.firestore {
     }
 
     function validPosition() {
-      return request.resource.data.keys().hasOnly([
-          'type', 'name', 'value', 'createdAt'
-        ])
-        && request.resource.data.keys().hasAll([
-          'type', 'name', 'value', 'createdAt'
-        ])
+      return request.resource.data.keys().hasOnly(['type', 'name', 'value', 'createdAt'])
+        && request.resource.data.keys().hasAll(['type', 'name', 'value', 'createdAt'])
         && request.resource.data.type in ['asset', 'reserve', 'debt']
         && request.resource.data.name is string
         && request.resource.data.name.size() > 0
@@ -80,7 +71,7 @@ service cloud.firestore {
       allow read: if owns(userId);
       allow create: if owns(userId)
         && request.resource.data.keys().hasOnly(['createdAt', 'email'])
-        && request.resource.data.email == 'luizcanalli@unochapeco.edu.br'
+        && request.resource.data.email == request.auth.token.email
         && request.resource.data.createdAt is timestamp;
       allow update, delete: if false;
 
