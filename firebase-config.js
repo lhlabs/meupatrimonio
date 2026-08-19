@@ -1,4 +1,5 @@
 import "./finance-core.js";
+import "./dashboard-stability.js";
 
 // Configuração pública do Firebase Web SDK.
 // Não contém senha nem credencial administrativa; a autorização real é feita por Authentication + Firestore Rules.
