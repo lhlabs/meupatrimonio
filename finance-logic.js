@@ -105,21 +105,6 @@ export function monthlySpendingGoal(income, ratio = MONTHLY_SPENDING_RATIO) {
   return Math.max(0, safeNumber(income)) * clamp(safeNumber(ratio), 0, 1);
 }
 
-export function realizedSpendingMetrics(transactions, date) {
-  const rows = monthRows(transactions, date);
-  const recurringExpenses = rows
-    .filter(item => item?.type === 'expense' && item.sourceType === 'recurring' && !isContribution(item))
-    .reduce((sum, item) => sum + safeNumber(item.amount), 0);
-  const otherExpenses = rows
-    .filter(item => item?.type === 'expense' && item.sourceType !== 'recurring' && !isContribution(item))
-    .reduce((sum, item) => sum + safeNumber(item.amount), 0);
-  return {
-    recurringExpenses,
-    otherExpenses,
-    totalExpenses: recurringExpenses + otherExpenses
-  };
-}
-
 export function daysElapsedInMonth(date, now = new Date()) {
   const isCurrent = date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
   return isCurrent ? Math.max(1, now.getDate()) : new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
@@ -170,19 +155,14 @@ export function recurringExpenseTotalForMonth(recurring, date) {
 }
 
 export function periodSpendingMetrics(transactions, recurring, date, now = new Date()) {
+  void recurring;
+  void now;
   const rows = monthRows(transactions, date);
-  const realizedRecurring = rows
-    .filter(item => item.type === 'expense' && item.sourceType === 'recurring' && !isContribution(item))
+  const recurringExpenses = rows
+    .filter(item => item?.type === 'expense' && item.sourceType === 'recurring' && !isContribution(item))
     .reduce((sum, item) => sum + safeNumber(item.amount), 0);
-  const currentKey = monthKey(now);
-  const requestedKey = monthKey(date);
-  const definedRecurring = requestedKey === currentKey
-    ? activeRecurringExpenseTotal(recurring, ymd(now))
-    : recurringExpenseTotalForMonth(recurring, date);
-  const isPastMonth = requestedKey < currentKey;
-  const recurringExpenses = isPastMonth ? realizedRecurring : Math.max(realizedRecurring, definedRecurring);
   const otherExpenses = rows
-    .filter(item => item.type === 'expense' && item.sourceType !== 'recurring' && !isContribution(item))
+    .filter(item => item?.type === 'expense' && item.sourceType !== 'recurring' && !isContribution(item))
     .reduce((sum, item) => sum + safeNumber(item.amount), 0);
   return {
     recurringExpenses,
