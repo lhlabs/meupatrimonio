@@ -28,6 +28,7 @@ jobs:
       - name: Validate JavaScript syntax
         run: |
           node --check app.js
+          node --check registration.js
           node --check dashboard-metrics.js
           node --check finance-logic.js
           node --check firebase-config.js
