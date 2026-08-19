@@ -168,9 +168,25 @@ function prepareUi() {
   const positionTitle = $('#positionDialog .dialog-head h2');
   if (positionTitle) positionTitle.id = 'positionDialogTitle';
 
+  installTransactionPeriodFilter();
   installMonthlyGoalForm();
   installAnnualToggle();
   ensureWithdrawalDialog();
+}
+
+function installTransactionPeriodFilter() {
+  const filters = $('#transactionsSection .filters');
+  const search = $('#txSearch');
+  if (!filters || !search || $('#txDateFrom')) return;
+  const from = document.createElement('input');
+  from.id = 'txDateFrom'; from.type = 'date'; from.title = 'De'; from.setAttribute('aria-label', 'Período inicial');
+  const to = document.createElement('input');
+  to.id = 'txDateTo'; to.type = 'date'; to.title = 'Até'; to.setAttribute('aria-label', 'Período final');
+  const reset = document.createElement('button');
+  reset.id = 'txPeriodReset'; reset.type = 'button'; reset.className = 'ghost-btn'; reset.textContent = 'Mês selecionado';
+  filters.insertBefore(from, search);
+  filters.insertBefore(to, search);
+  filters.appendChild(reset);
 }
 
 function installMonthlyGoalForm() {
@@ -616,10 +632,15 @@ function txRow(tx) {
 function renderTransactions() {
   const type = $('#txTypeFilter').value;
   const search = $('#txSearch').value.trim().toLowerCase();
-  let list = monthMetrics(txCache, selectedMonth).rows.slice().sort((a,b) => String(b.date).localeCompare(String(a.date)));
+  const dateFrom = $('#txDateFrom')?.value || '';
+  const dateTo = $('#txDateTo')?.value || '';
+  let list = txCache.slice().sort((a,b) => String(b.date).localeCompare(String(a.date)));
+  if (!dateFrom && !dateTo) list = monthMetrics(txCache, selectedMonth).rows.slice().sort((a,b) => String(b.date).localeCompare(String(a.date)));
+  if (dateFrom) list = list.filter(tx => String(tx.date || '') >= dateFrom);
+  if (dateTo) list = list.filter(tx => String(tx.date || '') <= dateTo);
   if (type !== 'all') list = list.filter(tx => tx.type === type);
   if (search) list = list.filter(tx => String(tx.description || '').toLowerCase().includes(search) || String(tx.category || '').toLowerCase().includes(search));
-  $('#transactionsList').innerHTML = list.map(txRow).join('') || '<div class="empty-state">Nenhum lançamento.</div>';
+  $('#transactionsList').innerHTML = list.map(txRow).join('') || '<div class="empty-state">Nenhum lançamento no período informado.</div>';
 }
 
 function barSvg(rows) {
@@ -933,6 +954,9 @@ $('#prevYear').addEventListener('click', () => { selectedYear--; renderAnnual();
 $('#nextYear').addEventListener('click', () => { selectedYear++; renderAnnual(); });
 $('#txTypeFilter').addEventListener('change', renderTransactions);
 $('#txSearch').addEventListener('input', renderTransactions);
+document.addEventListener('change', event => {
+  if (event.target.matches?.('#txDateFrom, #txDateTo')) renderTransactions();
+});
 $$('[data-tx-type]').forEach(button => button.addEventListener('click', () => setTxType(button.dataset.txType)));
 $('#recurringType').addEventListener('change', () => fillCategories($('#recurringCategory'), $('#recurringType').value));
 $('#scheduledType').addEventListener('change', () => fillCategories($('#scheduledCategory'), $('#scheduledType').value));
@@ -1049,6 +1073,14 @@ $('#scheduledForm').addEventListener('submit', async event => {
 
 document.addEventListener('click', async event => {
   const target = event.target;
+  const periodReset = target.closest?.('#txPeriodReset');
+  if (periodReset) {
+    event.preventDefault();
+    if ($('#txDateFrom')) $('#txDateFrom').value = '';
+    if ($('#txDateTo')) $('#txDateTo').value = '';
+    renderTransactions();
+    return;
+  }
   const withdraw = target.closest?.('[data-withdraw-contribution]');
   if (withdraw) { event.preventDefault(); openWithdrawal(); return; }
   if (target.dataset.editTx) return openTransaction(txCache.find(item => item.id === target.dataset.editTx));

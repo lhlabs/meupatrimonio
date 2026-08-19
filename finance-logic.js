@@ -155,19 +155,14 @@ export function recurringExpenseTotalForMonth(recurring, date) {
 }
 
 export function periodSpendingMetrics(transactions, recurring, date, now = new Date()) {
+  void recurring;
+  void now;
   const rows = monthRows(transactions, date);
-  const realizedRecurring = rows
-    .filter(item => item.type === 'expense' && item.sourceType === 'recurring' && !isContribution(item))
+  const recurringExpenses = rows
+    .filter(item => item?.type === 'expense' && item.sourceType === 'recurring' && !isContribution(item))
     .reduce((sum, item) => sum + safeNumber(item.amount), 0);
-  const currentKey = monthKey(now);
-  const requestedKey = monthKey(date);
-  const definedRecurring = requestedKey === currentKey
-    ? activeRecurringExpenseTotal(recurring, ymd(now))
-    : recurringExpenseTotalForMonth(recurring, date);
-  const isPastMonth = requestedKey < currentKey;
-  const recurringExpenses = isPastMonth ? realizedRecurring : Math.max(realizedRecurring, definedRecurring);
   const otherExpenses = rows
-    .filter(item => item.type === 'expense' && item.sourceType !== 'recurring' && !isContribution(item))
+    .filter(item => item?.type === 'expense' && item.sourceType !== 'recurring' && !isContribution(item))
     .reduce((sum, item) => sum + safeNumber(item.amount), 0);
   return {
     recurringExpenses,
@@ -233,16 +228,20 @@ export function scoreMetrics({ contribution, contributionGoal, spending, spendin
     };
   }
   const contributionScore = clamp(safeNumber(contribution) / safeNumber(contributionGoal), 0, 1);
-  const spendingScore = safeNumber(spending) <= safeNumber(spendingGoal)
+  const spendingValue = safeNumber(spending);
+  const spendingLimit = safeNumber(spendingGoal);
+  const spendingScore = spendingValue <= spendingLimit
     ? 1
-    : clamp(safeNumber(spendingGoal) / Math.max(safeNumber(spending), 0.01), 0, 1);
+    : clamp(1 - ((spendingValue - spendingLimit) / spendingLimit), 0, 1);
   const measures = [
     { score: contributionScore, weight: 40 },
     { score: spendingScore, weight: 35 }
   ];
   if (reserveProgress != null) measures.push({ score: clamp(reserveProgress, 0, 1), weight: 25 });
   const totalWeight = measures.reduce((sum, item) => sum + item.weight, 0);
-  const score = Math.round(measures.reduce((sum, item) => sum + item.score * item.weight, 0));
+  let score = Math.round(measures.reduce((sum, item) => sum + item.score * item.weight, 0));
+  if (spendingValue > spendingLimit * 1.5) score = Math.min(score, 49);
+  else if (spendingValue > spendingLimit) score = Math.min(score, 69);
   return {
     score,
     completeness: totalWeight,
