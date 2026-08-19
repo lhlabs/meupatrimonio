@@ -84,18 +84,23 @@ function installRegistrationPasswordGuard() {
   observer.observe(document.documentElement, { childList: true, subtree: true });
 }
 
-function installAuthEnumerationGuard() {
+function installAuthMessageGuard() {
   const attach = () => {
     const status = document.querySelector('#registerStatus');
-    if (!status || status.dataset.securityEnumerationGuard === '1') return false;
+    if (!status || status.dataset.securityMessageGuard === '1') return false;
 
     const sanitize = () => {
-      if (/já existe uma conta com este e-mail/i.test(status.textContent || '')) {
+      const message = status.textContent || '';
+      if (/já existe uma conta com este e-mail/i.test(message)) {
         status.textContent = 'Não foi possível criar a conta com estes dados. Se você já possui cadastro, tente entrar ou redefinir a senha.';
+        return;
+      }
+      if (/pelo menos 8 caracteres|mínimo 8 caracteres|no mínimo 8 caracteres/i.test(message)) {
+        status.textContent = 'Use uma senha com pelo menos 12 caracteres, incluindo maiúscula, minúscula, número e símbolo.';
       }
     };
 
-    status.dataset.securityEnumerationGuard = '1';
+    status.dataset.securityMessageGuard = '1';
     new MutationObserver(sanitize).observe(status, { childList: true, characterData: true, subtree: true });
     sanitize();
     return true;
@@ -110,7 +115,7 @@ function installAuthEnumerationGuard() {
 
 try {
   installRegistrationPasswordGuard();
-  installAuthEnumerationGuard();
+  installAuthMessageGuard();
 
   const app = await resolveApp();
   const auth = getAuth(app);
