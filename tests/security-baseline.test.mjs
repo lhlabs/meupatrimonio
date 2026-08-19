@@ -6,11 +6,13 @@ const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8'
 
 const schema = read('supabase/migrations/001_initial_schema.sql');
 const timestampGuards = read('supabase/migrations/002_server_timestamp_guards.sql');
+const functionConfig = read('supabase/config.toml');
 const supabaseConfig = read('supabase-config.js');
 const supabaseClient = read('supabase-client.js');
 const authCompat = read('compat/firebase-auth.js');
 const firestoreCompat = read('compat/firebase-firestore.js');
 const deleteAccount = read('supabase/functions/delete-account/index.ts');
+const migrationTool = read('tools/firebase-to-supabase/migrate-firestore-data.mjs');
 const hardening = read('security-hardening.js');
 const gitignore = read('.gitignore');
 const workflow = read('.github/workflows/pages.yml');
@@ -31,17 +33,11 @@ test('Supabase ativa e força RLS em todas as tabelas financeiras', () => {
 
 test('RLS limita CRUD ao proprietário autenticado', () => {
   for (const policy of [
-    'transactions_owner_only',
-    'positions_owner_only',
-    'planning_owner_only',
-    'monthly_goals_owner_only',
-    'recurring_owner_only',
-    'scheduled_owner_only'
-  ]) {
-    assert.ok(schema.includes(`create policy ${policy}`), `política ausente: ${policy}`);
-  }
+    'transactions_owner_only', 'positions_owner_only', 'planning_owner_only',
+    'monthly_goals_owner_only', 'recurring_owner_only', 'scheduled_owner_only'
+  ]) assert.ok(schema.includes(`create policy ${policy}`), `política ausente: ${policy}`);
   const ownershipChecks = schema.match(/\(select auth\.uid\(\)\) = user_id/g) || [];
-  assert.ok(ownershipChecks.length >= 12, 'USING e WITH CHECK devem validar auth.uid() em todas as políticas');
+  assert.ok(ownershipChecks.length >= 12);
   assert.match(schema, /for all to authenticated/i);
 });
 
@@ -60,16 +56,17 @@ test('Banco preserva validações financeiras e IDs graváveis', () => {
   assert.match(schema, /"reserveTargetMonths" between 1 and 24/);
 });
 
-test('Timestamps críticos são controlados pelo PostgreSQL', () => {
+test('Timestamps críticos são controlados pelo PostgreSQL para sessões do PWA', () => {
+  assert.match(timestampGuards, /auth\.uid\(\) is not null/);
   assert.match(timestampGuards, /new\."createdAt" = now\(\)/);
   assert.match(timestampGuards, /new\."updatedAt" = now\(\)/);
   for (const table of ['transactions', 'positions', 'monthly_goals', 'recurring', 'scheduled', 'planning']) {
-    assert.ok(timestampGuards.toLowerCase().includes(table), `trigger de timestamp ausente para ${table}`);
+    assert.ok(timestampGuards.toLowerCase().includes(table));
   }
   assert.match(schema, /new\."createdAt" = old\."createdAt"/);
 });
 
-test('Frontend usa apenas URL e publishable key do Supabase', () => {
+test('Frontend usa somente URL e publishable key do Supabase', () => {
   assert.match(supabaseConfig, /__SUPABASE_URL__/);
   assert.match(supabaseConfig, /__SUPABASE_PUBLISHABLE_KEY__/);
   assert.match(supabaseConfig, /sb_publishable_/);
@@ -80,14 +77,7 @@ test('Frontend usa apenas URL e publishable key do Supabase', () => {
 });
 
 test('Autenticação foi redirecionada para Supabase Auth', () => {
-  for (const method of [
-    'signInWithPassword',
-    'signUp',
-    'resend',
-    'resetPasswordForEmail',
-    'onAuthStateChange',
-    'updateUser'
-  ]) {
+  for (const method of ['signInWithPassword','signUp','resend','resetPasswordForEmail','onAuthStateChange','updateUser']) {
     assert.ok(authCompat.includes(method), `método Supabase ausente: ${method}`);
   }
   assert.match(authCompat, /email not confirmed/);
@@ -101,12 +91,24 @@ test('CRUD legado resolve somente para tabelas Supabase conhecidas', () => {
   assert.match(firestoreCompat, /Coleção não suportada/);
 });
 
-test('Exclusão de conta mantém service role somente no servidor', () => {
+test('Exclusão de conta usa chave secreta somente na Edge Function autenticada', () => {
   assert.match(authCompat, /functions\.invoke\('delete-account'/);
-  assert.match(deleteAccount, /SUPABASE_SERVICE_ROLE_KEY/);
+  assert.match(deleteAccount, /SUPABASE_SECRET_KEYS/);
+  assert.match(deleteAccount, /secretKeys\.default/);
   assert.match(deleteAccount, /auth\.getUser\(token\)/);
   assert.match(deleteAccount, /auth\.admin\.deleteUser\(userData\.user\.id\)/);
-  assert.doesNotMatch(authCompat, /SUPABASE_SERVICE_ROLE_KEY/);
+  assert.match(functionConfig, /\[functions\.delete-account\][\s\S]*verify_jwt\s*=\s*true/);
+  assert.doesNotMatch(authCompat, /SUPABASE_SECRET_KEYS|sb_secret_/);
+});
+
+test('Migrador administrativo usa credenciais somente por ambiente e mapeia usuários por e-mail', () => {
+  assert.match(migrationTool, /GOOGLE_APPLICATION_CREDENTIALS/);
+  assert.match(migrationTool, /SUPABASE_SECRET_KEY/);
+  assert.match(migrationTool, /normalizeEmail/);
+  assert.match(migrationTool, /supabaseByEmail/);
+  assert.match(migrationTool, /user_id: userId/);
+  assert.match(migrationTool, /MIGRATION_DRY_RUN/);
+  assert.doesNotMatch(migrationTool, /sb_secret_[A-Za-z0-9_-]+/);
 });
 
 test('Camada de sessão mantém política forte e encerra por inatividade', () => {
@@ -120,7 +122,7 @@ test('Camada de sessão mantém política forte e encerra por inatividade', () =
   assert.match(hardening, /\[\^A-Za-z0-9\]/);
 });
 
-test('PWA inclui a nova camada de infraestrutura no cache de aplicação', () => {
+test('PWA inclui a nova infraestrutura no cache', () => {
   for (const sw of [rootSw, mobileSw]) {
     assert.match(sw, /supabase-config\.js/);
     assert.match(sw, /supabase-client\.js/);
@@ -129,8 +131,8 @@ test('PWA inclui a nova camada de infraestrutura no cache de aplicação', () =>
   }
 });
 
-test('Arquivos típicos de credenciais privadas permanecem ignorados', () => {
-  for (const pattern of ['.env', '*.pem', '*.key', '*.jks', '*.keystore', 'service-account', 'firebase-adminsdk']) {
+test('Arquivos de credenciais e exportações de migração permanecem ignorados', () => {
+  for (const pattern of ['.env', '*.pem', '*.key', '*.jks', '*.keystore', 'service-account', 'firebase-adminsdk', 'migration-export']) {
     assert.ok(gitignore.includes(pattern), `faltando proteção no .gitignore para ${pattern}`);
   }
 });
