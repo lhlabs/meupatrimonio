@@ -13,6 +13,16 @@
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
   <link rel="stylesheet" href="./mobile.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "https://www.gstatic.com/firebasejs/12.17.0/firebase-app.js": "../compat/firebase-app.js",
+      "https://www.gstatic.com/firebasejs/12.17.0/firebase-auth.js": "../compat/firebase-auth.js",
+      "https://www.gstatic.com/firebasejs/12.17.0/firebase-firestore.js": "../compat/firebase-firestore.js",
+      "https://www.gstatic.com/firebasejs/12.17.0/firebase-app-check.js": "../compat/firebase-app-check.js"
+    }
+  }
+  </script>
   <title>Meu Patrimônio App</title>
 </head>
 <body>
@@ -21,14 +31,14 @@
   <section id="authView" class="auth-shell">
     <div class="auth-card panel">
       <div class="brand"><span class="brand-mark">MP</span><div><small>APP PESSOAL</small><h1>Meu Patrimônio</h1></div></div>
-      <p class="muted">Entre com a mesma conta da versão web. Seus dados continuam no mesmo Firebase.</p>
+      <p class="muted">Entre com a mesma conta da versão web. Seus dados continuam sincronizados com segurança.</p>
       <form id="loginForm" class="stack" autocomplete="on">
         <label>E-mail<input id="email" type="email" autocomplete="username" required /></label>
         <label>Senha<input id="password" type="password" autocomplete="current-password" required /></label>
         <button class="primary" type="submit">Entrar</button>
       </form>
       <button id="resetPasswordBtn" class="text-button" type="button">Esqueci minha senha</button>
-      <div class="security">🔒 Firebase Auth + dados isolados por usuário</div>
+      <div class="security">🔒 Supabase Auth + dados isolados por usuário</div>
     </div>
   </section>
 
