@@ -7,6 +7,7 @@ const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8'
 const rules = read('firestore.rules');
 const firebaseConfig = JSON.parse(read('firebase.json'));
 const firebaseRc = JSON.parse(read('.firebaserc'));
+const publicFirebaseConfig = read('firebase-config.js');
 const app = read('app.js');
 const mobile = read('mobile/mobile.js');
 const hardening = read('security-hardening.js');
@@ -58,11 +59,24 @@ test('Web e mobile inicializam App Check', () => {
   }
 });
 
-test('Camada de sessão reduz persistência e encerra por inatividade', () => {
+test('Camada de sessão reduz persistência, aplica ordem determinística e encerra por inatividade', () => {
   assert.match(hardening, /browserSessionPersistence/);
   assert.match(hardening, /setPersistence\(auth,\s*browserSessionPersistence\)/);
   assert.match(hardening, /15\s*\*\s*60\s*\*\s*1000/);
   assert.match(hardening, /signOut\(auth\)/);
+  assert.match(publicFirebaseConfig, /window\.addEventListener\('load',\s*loadSessionHardening,\s*\{\s*once:\s*true\s*\}\)/);
+  assert.match(publicFirebaseConfig, /import\('\.\/security-hardening\.js'\)/);
+  assert.doesNotMatch(publicFirebaseConfig, /Promise\.allSettled\(\[\s*import\('\.\/security-hardening\.js'\)/s);
+});
+
+test('Cadastro mantém política forte de 12 caracteres na camada efetiva', () => {
+  assert.match(hardening, /password\.length\s*>=\s*12/);
+  assert.match(hardening, /\[a-z\]/);
+  assert.match(hardening, /\[A-Z\]/);
+  assert.match(hardening, /\\d/);
+  assert.match(hardening, /\[\^A-Za-z0-9\]/);
+  assert.match(hardening, /field\.minLength\s*=\s*12/);
+  assert.match(hardening, /pelo menos 8 caracteres\|mínimo 8 caracteres\|no mínimo 8 caracteres/i);
 });
 
 test('Arquivos típicos de credenciais privadas permanecem ignorados', () => {
