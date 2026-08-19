@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { monthlySpendingGoal, realizedSpendingMetrics, scoreMetrics } from '../finance-logic.js';
+import { monthlySpendingGoal, periodSpendingMetrics, scoreMetrics } from '../finance-logic.js';
 
 test('gasto realizado do mês soma apenas lançamentos do mês e exclui aportes', () => {
   const tx = [
@@ -10,7 +10,7 @@ test('gasto realizado do mês soma apenas lançamentos do mês e exclui aportes'
     { type:'expense', amount:3000, date:'2026-08-12', category:'Investimentos/Aportes' },
     { type:'expense', amount:900, date:'2026-09-01', category:'Mercado' }
   ];
-  const result = realizedSpendingMetrics(tx, new Date(2026, 7, 1));
+  const result = periodSpendingMetrics(tx, [], new Date(2026, 7, 1));
   assert.equal(result.recurringExpenses, 4500);
   assert.equal(result.otherExpenses, 1200);
   assert.equal(result.totalExpenses, 5700);
@@ -22,7 +22,10 @@ test('recorrência cadastrada mas ainda não realizada não infla gasto realizad
     { type:'expense', amount:1500, date:'2026-08-05', category:'Moradia', sourceType:'recurring' },
     { type:'expense', amount:600, date:'2026-08-08', category:'Mercado' }
   ];
-  const result = realizedSpendingMetrics(tx, new Date(2026, 7, 1));
+  const recurring = [
+    { active:true, type:'expense', amount:5000, category:'Veículo', startDate:'2026-01-01', endDate:'', dayOfMonth:25 }
+  ];
+  const result = periodSpendingMetrics(tx, recurring, new Date(2026, 7, 1));
   assert.equal(result.totalExpenses, 2100);
 });
 
