@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { periodSpendingMetrics, reserveMetrics } from '../finance-logic.js';
+import { periodSpendingMetrics, recurringDue, reserveMetrics } from '../finance-logic.js';
 
 test('reserva considera recorrência ativa do mês mesmo se o vencimento antecede a data de início', () => {
   const recurring = [
@@ -29,4 +29,19 @@ test('gastos do mês corrente usam todas as recorrências ativas como compromiss
   assert.equal(result.recurringExpenses, 2000);
   assert.equal(result.otherExpenses, 0);
   assert.equal(result.totalExpenses, 2000);
+});
+
+test('recorrência criada a partir de lançamento manual não duplica o mês inicial', () => {
+  const legacy = {
+    id:'legacy_seed123',
+    active:true,
+    type:'expense',
+    amount:900,
+    dayOfMonth:10,
+    category:'Moradia',
+    startDate:'2026-08-10',
+    endDate:''
+  };
+  assert.equal(recurringDue(legacy, new Date(2026,7,1)), null);
+  assert.equal(recurringDue(legacy, new Date(2026,8,1)), '2026-09-10');
 });
