@@ -1,5 +1,4 @@
 import "./enhancements.js";
-import "./integrity.js";
 import "./finance-v3.js";
 
 // Configuração pública do Firebase Web SDK.
