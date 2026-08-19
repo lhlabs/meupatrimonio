@@ -27,6 +27,7 @@ jobs:
       - name: Validate JavaScript syntax
         run: |
           node --check app.js
+          node --check dashboard-metrics.js
           node --check finance-logic.js
           node --check portfolio.js
           node --check sw.js
