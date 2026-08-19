@@ -111,6 +111,8 @@ export function dailyVariableAverage(transactions, date, now = new Date()) {
 export function recurringDue(recurring, date) {
   if (!recurring?.active) return null;
   const due = dueDateFor(date.getFullYear(), date.getMonth(), recurring.dayOfMonth);
+  const startMonth = String(recurring.startDate || '').slice(0, 7);
+  if (String(recurring.id || '').startsWith('legacy_') && startMonth && due.slice(0, 7) === startMonth) return null;
   if (recurring.startDate && due < recurring.startDate) return null;
   if (recurring.endDate && due > recurring.endDate) return null;
   return due;
@@ -150,8 +152,12 @@ export function periodSpendingMetrics(transactions, recurring, date, now = new D
   const realizedRecurring = rows
     .filter(item => item.type === 'expense' && item.sourceType === 'recurring' && !isContribution(item))
     .reduce((sum, item) => sum + safeNumber(item.amount), 0);
-  const definedRecurring = recurringExpenseTotalForMonth(recurring, date);
-  const isPastMonth = monthKey(date) < monthKey(now);
+  const currentKey = monthKey(now);
+  const requestedKey = monthKey(date);
+  const definedRecurring = requestedKey === currentKey
+    ? activeRecurringExpenseTotal(recurring, ymd(now))
+    : recurringExpenseTotalForMonth(recurring, date);
+  const isPastMonth = requestedKey < currentKey;
   const recurringExpenses = isPastMonth ? realizedRecurring : Math.max(realizedRecurring, definedRecurring);
   const otherExpenses = rows
     .filter(item => item.type === 'expense' && item.sourceType !== 'recurring' && !isContribution(item))
@@ -188,13 +194,8 @@ export function completedConsumptionHistory(transactions, todayYmd = ymd(new Dat
 }
 
 export function reserveMetrics({ reserve, transactions, recurring, referenceDate = new Date(), todayYmd = ymd(new Date()), targetMonths = 6 }) {
-  // A reserva usa exatamente a mesma base de recorrências cadastradas usada pelo resumo mensal.
-  // Navegar para outro mês no dashboard não altera a meta: a referência é sempre o mês corrente real.
   void referenceDate;
-  const [year, month] = String(todayYmd).split('-').map(Number);
-  const currentMonth = Number.isFinite(year) && Number.isFinite(month) ? new Date(year, month - 1, 1) : new Date();
-  currentMonth.setDate(1);
-  const recurringBase = recurringExpenseTotalForMonth(recurring, currentMonth);
+  const recurringBase = activeRecurringExpenseTotal(recurring, todayYmd);
   const history = completedConsumptionHistory(transactions, todayYmd, 6);
   const monthlyBase = recurringBase;
   const months = monthlyBase > 0 ? safeNumber(reserve) / monthlyBase : null;
