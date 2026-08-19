@@ -1,4 +1,4 @@
-const CACHE='meu-patrimonio-v27';
+const CACHE='meu-patrimonio-v28';
 const FILES=['./','./index.html','./styles.css','./styles.base.css','./app.js','./registration.js','./dashboard-metrics.js','./finance-logic.js','./firebase-config.js','./manifest.webmanifest','./icon.svg'];
 self.addEventListener('install',event=>{self.skipWaiting();event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(FILES)))});
 self.addEventListener('activate',event=>{event.waitUntil(Promise.all([caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))),self.clients.claim()]))});
