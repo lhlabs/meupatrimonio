@@ -1,5 +1,9 @@
 begin;
 
+-- Para operações normais do PWA, timestamps são sempre definidos pelo banco.
+-- Em migrações administrativas executadas sem auth.uid() (service role/SQL),
+-- valores históricos podem ser preservados quando fornecidos explicitamente.
+
 create or replace function private.mp_set_created_at()
 returns trigger
 language plpgsql
@@ -7,7 +11,9 @@ security invoker
 set search_path = pg_catalog, public
 as $$
 begin
-  new."createdAt" = now();
+  if auth.uid() is not null or new."createdAt" is null then
+    new."createdAt" = now();
+  end if;
   return new;
 end;
 $$;
@@ -19,8 +25,12 @@ security invoker
 set search_path = pg_catalog, public
 as $$
 begin
-  new."createdAt" = now();
-  new."updatedAt" = now();
+  if auth.uid() is not null or new."createdAt" is null then
+    new."createdAt" = now();
+  end if;
+  if auth.uid() is not null or new."updatedAt" is null then
+    new."updatedAt" = now();
+  end if;
   return new;
 end;
 $$;
@@ -32,7 +42,9 @@ security invoker
 set search_path = pg_catalog, public
 as $$
 begin
-  new."updatedAt" = now();
+  if auth.uid() is not null or new."updatedAt" is null then
+    new."updatedAt" = now();
+  end if;
   return new;
 end;
 $$;
