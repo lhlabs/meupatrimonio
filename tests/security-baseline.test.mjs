@@ -32,6 +32,19 @@ test('Firestore exige autenticação para dados privados', () => {
   assert.match(rules, /emailVerified\(\)/);
 });
 
+test('Firestore limita categorias e IDs graváveis para reduzir manipulação e injeção', () => {
+  assert.match(rules, /function\s+validDocumentId\(v\).*\^\[A-Za-z0-9_-\]\{1,160\}\$/s);
+  assert.match(rules, /function\s+validBaseCategory\(type, category\)/);
+  for (const category of ['Moradia', 'Academia', 'Investimentos/Aportes', 'Salário', 'Renda extra', 'Outros']) {
+    assert.ok(rules.includes(`'${category}'`), `categoria esperada ausente: ${category}`);
+  }
+  assert.match(rules, /type\s*==\s*'income'\s*&&\s*category\s*==\s*'Resgate de Patrimônio'/);
+  for (const id of ['txId', 'positionId', 'recurringId', 'scheduledId']) {
+    assert.match(rules, new RegExp(`validDocumentId\\(${id}\\)`));
+  }
+  assert.doesNotMatch(rules, /request\.resource\.data\.category\s+is\s+string\s+&&\s+request\.resource\.data\.category\.size\(\)\s*>\s*0/);
+});
+
 test('Firebase CLI usa exatamente as rules versionadas neste repositório', () => {
   assert.equal(firebaseConfig.firestore?.rules, 'firestore.rules');
   assert.equal(firebaseRc.projects?.default, 'meupatrimonio-4c878');
