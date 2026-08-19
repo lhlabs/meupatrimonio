@@ -11,7 +11,7 @@ import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gst
 import { firebaseConfig, appCheckSiteKey } from "./firebase-config.js";
 import {
   CONTRIBUTION_CATEGORY, WITHDRAWAL_CATEGORY, addYear, clamp, contributionBalance,
-  dailyVariableAverage, isContribution, isWithdrawal, monthKey, monthMetrics,
+  isContribution, isWithdrawal, monthKey, monthMetrics, monthlySpendingGoal,
   nextRecurringDue, periodSpendingMetrics, positionMetrics, projectFutureValue,
   recurringDue, reserveMetrics, safeNumber, scoreMetrics, ymd
 } from "./finance-logic.js";
@@ -90,6 +90,10 @@ function goalFor(date = selectedMonth) {
 }
 function calcPositions() { return positionMetrics(positionsCache, txCache, ymd(new Date())); }
 function timestampValue(value) { return value?.toMillis?.() ?? 0; }
+function dateFromMonthKey(key) {
+  const [year, month] = String(key || '').split('-').map(Number);
+  return Number.isFinite(year) && Number.isFinite(month) ? new Date(year, month - 1, 1) : null;
+}
 
 async function runAction(button, task, successMessage) {
   if (actionBusy) return;
@@ -122,7 +126,7 @@ function prepareUi() {
     if (h) h.textContent = 'Metas financeiras do mês';
     const labels = goalCard.querySelectorAll('.goal-grid > div > span');
     if (labels[0]) labels[0].textContent = 'Aporte líquido';
-    if (labels[1]) labels[1].textContent = 'Gasto variável/dia';
+    if (labels[1]) labels[1].textContent = 'Gasto mensal (60% da renda)';
   }
 
   const freedom = $('.freedom-card');
@@ -175,12 +179,12 @@ function installMonthlyGoalForm() {
   form.id = 'monthlyGoalForm';
   form.className = 'panel form-grid';
   form.innerHTML = `
-    <div style="grid-column:1/-1"><span class="card-kicker">METAS MENSAIS</span><h2 style="margin:4px 0">Aporte e gasto diário</h2><p class="muted" style="margin:0">A meta de aporte mede quanto você transfere para patrimônio. O limite diário considera apenas gastos variáveis manuais, sem contas recorrentes, agendadas ou aportes.</p></div>
+    <div style="grid-column:1/-1"><span class="card-kicker">METAS MENSAIS</span><h2 style="margin:4px 0">Aporte e gasto mensal</h2><p class="muted" style="margin:0">A meta de aporte é definida por você. A meta de gasto é automática: no máximo 60% da renda do mês. Aportes não são tratados como gasto.</p></div>
     <label>Mês<input id="monthlyGoalMonth" type="month" required></label>
     <label>Meta de aporte do mês<input id="monthlyGoalContribution" type="number" min="0" step="50" required></label>
-    <label>Limite médio diário variável<input id="monthlyGoalDailySpend" type="number" min="0" step="5" required></label>
+    <div id="monthlySpendingGoalInfo" class="muted" style="align-self:end"></div>
     <div id="monthlyGoalFeedback" class="muted" style="align-self:end"></div>
-    <button class="primary" type="submit">Salvar metas deste mês</button>`;
+    <button class="primary" type="submit">Salvar meta de aporte</button>`;
   $('#planningForm').parentNode.insertBefore(form, $('#planningForm'));
   $('#monthlyGoalMonth').value = monthKey(new Date());
   $('#monthlyGoalMonth').addEventListener('change', loadMonthlyGoalForm);
@@ -190,21 +194,20 @@ function installMonthlyGoalForm() {
     await runAction(button, async () => {
       const key = $('#monthlyGoalMonth').value;
       const contributionGoal = safeNumber($('#monthlyGoalContribution').value);
-      const dailySpendGoal = safeNumber($('#monthlyGoalDailySpend').value);
-      if (!/^\d{4}-\d{2}$/.test(key) || contributionGoal < 0 || dailySpendGoal < 0) throw new Error('Metas inválidas');
+      if (!/^\d{4}-\d{2}$/.test(key) || contributionGoal < 0) throw new Error('Metas inválidas');
       const ref = userDoc('monthlyGoals', key);
       const snapshot = await getDoc(ref);
       await setDoc(ref, {
         month: key,
         monthlySurplusGoal: contributionGoal,
-        dailySpendGoal,
+        dailySpendGoal: safeNumber(snapshot.data()?.dailySpendGoal),
         createdAt: snapshot.exists() ? snapshot.data().createdAt : serverTimestamp(),
         updatedAt: serverTimestamp()
       });
       await loadAll();
       $('#monthlyGoalMonth').value = key;
       loadMonthlyGoalForm();
-    }, 'Metas do mês atualizadas');
+    }, 'Meta de aporte atualizada');
   });
 }
 
@@ -212,9 +215,14 @@ function loadMonthlyGoalForm() {
   const key = $('#monthlyGoalMonth')?.value;
   if (!key) return;
   const goal = monthlyGoalsCache.find(item => item.id === key || item.month === key);
+  const date = dateFromMonthKey(key);
+  const metrics = date ? monthMetrics(txCache, date) : null;
+  const spendingGoal = monthlySpendingGoal(metrics?.income);
   $('#monthlyGoalContribution').value = goal?.monthlySurplusGoal ?? '';
-  $('#monthlyGoalDailySpend').value = goal?.dailySpendGoal ?? '';
-  $('#monthlyGoalFeedback').textContent = goal ? 'Metas cadastradas para este mês.' : 'Nenhuma meta cadastrada para este mês.';
+  $('#monthlySpendingGoalInfo').textContent = metrics?.income > 0
+    ? `Meta automática de gasto: ${currency.format(spendingGoal)} · 60% da renda de ${currency.format(metrics.income)}.`
+    : 'Meta de gasto: cadastre a renda deste mês para calcular automaticamente 60%.';
+  $('#monthlyGoalFeedback').textContent = goal ? 'Meta de aporte cadastrada para este mês.' : 'Nenhuma meta de aporte cadastrada para este mês.';
 }
 
 function installAnnualToggle() {
@@ -489,14 +497,13 @@ function renderDashboard() {
     targetMonths: safeNumber(settings.reserveTargetMonths) || 6
   });
   const spending = periodSpendingMetrics(txCache, recurringCache, selectedMonth);
-  const dailyAverage = dailyVariableAverage(txCache, selectedMonth);
+  const spendingGoal = monthlySpendingGoal(metrics.income);
   const contributionGoal = safeNumber(goal?.monthlySurplusGoal);
-  const dailyGoal = safeNumber(goal?.dailySpendGoal);
   const score = scoreMetrics({
     contribution: metrics.contribution,
     contributionGoal,
-    dailyAverage,
-    dailyGoal,
+    spending: spending.totalExpenses,
+    spendingGoal,
     reserveProgress: reserve.progress
   });
 
@@ -542,11 +549,11 @@ function renderDashboard() {
     $('#freedomBadge').textContent = 'Reserva não calculável';
   }
 
-  renderScoreAndPet(score, { metrics, goal, dailyAverage, reserve });
+  renderScoreAndPet(score, { metrics, goal, spending, spendingGoal, reserve });
   renderCashflow();
   renderDonut(metrics);
-  renderInsights(metrics, positions, goal, dailyAverage, reserve);
-  renderMissions(metrics, goal, dailyAverage, reserve);
+  renderInsights(metrics, positions, spending, spendingGoal, reserve);
+  renderMissions(metrics, goal, spending, spendingGoal, reserve);
   renderForecast();
   renderUpcoming();
   $('#recentTransactions').innerHTML = metrics.rows.slice()
@@ -555,26 +562,25 @@ function renderDashboard() {
 }
 
 function renderScoreAndPet(score, context) {
-  const { metrics, goal, dailyAverage, reserve } = context;
+  const { metrics, goal, spending, spendingGoal, reserve } = context;
   const contributionGoal = safeNumber(goal?.monthlySurplusGoal);
-  const dailyGoal = safeNumber(goal?.dailySpendGoal);
   const health = score.score;
   $('#financeScore').textContent = health == null ? '—' : String(health);
   $('#scoreRing').style.setProperty('--p', `${health ?? 0}%`);
   $('#scoreLabel').textContent = health == null ? 'Aguardando metas' : health >= 85 ? 'Excelente' : health >= 70 ? 'Forte' : health >= 50 ? 'Em evolução' : 'Atenção';
   $('#scoreHint').textContent = health == null
-    ? 'Defina meta de aporte e limite diário para calcular o score.'
-    : `Score: aporte 40% + gasto diário 35%${reserve.progress != null ? ' + reserva 25%' : ''}${score.completeness < 100 ? ' · parcial' : ''}.`;
+    ? 'Defina a meta de aporte e registre a renda do mês para calcular o score.'
+    : `Score: aporte 40% + gasto mensal 35%${reserve.progress != null ? ' + reserva 25%' : ''}${score.completeness < 100 ? ' · parcial' : ''}.`;
   const xp = Math.max(0, txCache.length * 2 + (health ?? 0) * 4 + (reserve.progress === 1 ? 200 : 0));
   $('#xpPill').textContent = `${Math.round(xp)} XP`;
   $('#levelPill').textContent = `Nível ${Math.max(1, Math.floor(xp / 500) + 1)}`;
 
-  let avatar = '🐷', state = 'Aguardando metas', message = 'Defina suas metas mensais para eu avaliar sua disciplina financeira.';
+  let avatar = '🐷', state = 'Aguardando metas', message = 'Defina a meta de aporte e registre sua renda para eu avaliar sua disciplina financeira.';
   if (health != null) {
-    if (health >= 85) { avatar = '🐷✨'; state = 'Radiante'; message = 'Aporte, gasto diário e reserva estão muito bem alinhados.'; }
-    else if (health >= 70) { state = 'Saudável'; message = 'Boa disciplina. Mantenha o ritmo das metas.'; }
+    if (health >= 85) { avatar = '🐷✨'; state = 'Radiante'; message = 'Aporte, gasto mensal e reserva estão muito bem alinhados.'; }
+    else if (health >= 70) { state = 'Saudável'; message = 'Boa disciplina. Mantenha o gasto mensal dentro de 60% da renda.'; }
     else if (health >= 50) { avatar = '🐽'; state = 'Em atenção'; message = 'Uma das metas está pressionando sua saúde financeira.'; }
-    else { avatar = '😵‍💫'; state = 'Crítico'; message = 'Aporte, gasto diário ou reserva precisam de correção.'; }
+    else { avatar = '😵‍💫'; state = 'Crítico'; message = 'Aporte, gasto mensal ou reserva precisam de correção.'; }
   }
   $('#petAvatar').textContent = avatar;
   $('#petName').textContent = `Cofrinho · ${state}`;
@@ -584,7 +590,7 @@ function renderScoreAndPet(score, context) {
   $('#petHealthBar').style.width = `${health ?? 0}%`;
   const vitals = [
     ['Aportes', contributionGoal ? `${Math.round(clamp(metrics.contribution / contributionGoal, 0, 1) * 100)}%` : '—'],
-    ['Gasto/dia', dailyGoal ? `${currency.format(dailyAverage)} / ${currency.format(dailyGoal)}` : '—'],
+    ['Gasto mês', spendingGoal > 0 ? `${currency.format(spending.totalExpenses)} / ${currency.format(spendingGoal)}` : '—'],
     ['Reserva', reserve.months != null ? `${reserve.months.toFixed(1)} meses` : '—']
   ];
   $('#petVitals').innerHTML = vitals.map(([a,b]) => `<div><span>${a}</span><strong>${b}</strong></div>`).join('');
@@ -592,10 +598,10 @@ function renderScoreAndPet(score, context) {
   $('#surplusGoalDetail').textContent = contributionGoal
     ? `Meta ${currency.format(contributionGoal)} · ${metrics.contribution >= contributionGoal ? 'atingida' : 'faltam ' + currency.format(contributionGoal - metrics.contribution)}`
     : 'Defina a meta mensal em Metas';
-  $('#dailyGoalStatus').textContent = currency.format(dailyAverage);
-  $('#dailyGoalDetail').textContent = dailyGoal
-    ? `Limite ${currency.format(dailyGoal)}/dia · ${dailyAverage <= dailyGoal ? 'dentro' : 'acima em ' + currency.format(dailyAverage - dailyGoal)}`
-    : 'Defina o limite diário em Metas';
+  $('#dailyGoalStatus').textContent = currency.format(spending.totalExpenses);
+  $('#dailyGoalDetail').textContent = spendingGoal > 0
+    ? `Meta ${currency.format(spendingGoal)} · 60% da renda · ${spending.totalExpenses <= spendingGoal ? 'dentro da meta' : 'acima em ' + currency.format(spending.totalExpenses - spendingGoal)}`
+    : 'Cadastre a renda do mês para calcular a meta de 60%';
 }
 
 function txRow(tx) {
@@ -653,7 +659,7 @@ function renderDonut(metrics) {
   $('#categoryLegend').innerHTML = rows.slice(0,6).map(([category,value],i) => `<div class="category-item"><i class="category-swatch" style="background:${palette[i % palette.length]}"></i><span>${esc(category)}</span><b>${currency.format(value)}</b></div>`).join('') || '<div class="muted">Sem gastos de consumo.</div>';
 }
 
-function renderInsights(metrics, positions, goal, dailyAverage, reserve) {
+function renderInsights(metrics, positions, spending, spendingGoal, reserve) {
   const insights = [];
   const prev = new Date(selectedMonth); prev.setMonth(prev.getMonth() - 1);
   const previous = monthMetrics(txCache, prev);
@@ -665,19 +671,28 @@ function renderInsights(metrics, positions, goal, dailyAverage, reserve) {
   metrics.rows.filter(tx => tx.type === 'expense' && !isContribution(tx)).forEach(tx => cats[tx.category] = (cats[tx.category] || 0) + safeNumber(tx.amount));
   const top = Object.entries(cats).sort((a,b) => b[1] - a[1])[0];
   if (top) insights.push(['🎯','Maior categoria',`${top[0]} representa ${(metrics.consumption ? top[1] / metrics.consumption * 100 : 0).toFixed(1)}% dos gastos.`]);
-  insights.push(['🛟','Reserva', reserve.months != null ? `Cobertura de ${reserve.months.toFixed(1)} meses com base recorrente mensal de ${currency.format(reserve.monthlyBase)}.` : 'Ainda não há base recorrente válida para dimensionar a reserva.']);
-  if (safeNumber(goal?.dailySpendGoal) > 0) insights.push([dailyAverage <= goal.dailySpendGoal ? '✅' : '⚠️','Gasto variável diário',`${currency.format(dailyAverage)}/dia vs. limite de ${currency.format(goal.dailySpendGoal)}.`]);
+  insights.push(['🛟','Reserva', reserve.months != null
+    ? `Cobertura de ${reserve.months.toFixed(1)} meses. Valor considerado: ${currency.format(positions.reserve)} = ${currency.format(positions.manualReserve)} cadastrados + ${currency.format(positions.contributionAssets)} em aportes líquidos.`
+    : 'Ainda não há base recorrente válida para dimensionar a reserva.']);
+  if (spendingGoal > 0) {
+    insights.push([
+      spending.totalExpenses <= spendingGoal ? '✅' : '⚠️',
+      'Meta de gasto mensal',
+      `${currency.format(spending.totalExpenses)} de ${currency.format(spendingGoal)} (60% da renda). Aportes não entram como gasto.`
+    ]);
+  } else {
+    insights.push(['ℹ️','Meta de gasto mensal','Cadastre a renda do mês para calcular automaticamente o limite de 60%.']);
+  }
   if (positions.debts > 0) insights.push(['📉','Dívidas',`Saldo devedor cadastrado: ${currency.format(positions.debts)}.`]);
   $('#insightsList').innerHTML = insights.map(item => `<div class="insight"><div class="insight-icon">${item[0]}</div><div><strong>${item[1]}</strong><p>${item[2]}</p></div></div>`).join('');
 }
 
-function renderMissions(metrics, goal, dailyAverage, reserve) {
+function renderMissions(metrics, goal, spending, spendingGoal, reserve) {
   const contributionGoal = safeNumber(goal?.monthlySurplusGoal);
-  const dailyGoal = safeNumber(goal?.dailySpendGoal);
   const targetMonths = safeNumber(settings.reserveTargetMonths) || 6;
   const missions = [
     ['📈','Meta de aportes', contributionGoal ? `${currency.format(metrics.contribution)} / ${currency.format(contributionGoal)}` : 'Defina uma meta mensal', contributionGoal ? clamp(metrics.contribution / contributionGoal,0,1) : 0],
-    ['🎯','Gasto variável diário', dailyGoal ? `${currency.format(dailyAverage)} / ${currency.format(dailyGoal)} por dia` : 'Defina um limite diário', dailyGoal ? (dailyAverage <= dailyGoal ? 1 : clamp(dailyGoal / Math.max(dailyAverage,.01),0,1)) : 0],
+    ['🎯','Gasto mensal ≤ 60% da renda', spendingGoal > 0 ? `${currency.format(spending.totalExpenses)} / ${currency.format(spendingGoal)}` : 'Cadastre a renda do mês', spendingGoal > 0 ? (spending.totalExpenses <= spendingGoal ? 1 : clamp(spendingGoal / Math.max(spending.totalExpenses,.01),0,1)) : 0],
     ['🛟','Reserva de emergência', reserve.target ? `${currency.format(calcPositions().reserve)} / ${currency.format(reserve.target)} (${targetMonths} meses)` : 'Cadastre recorrências ativas', reserve.progress ?? 0]
   ];
   $('#missionsList').innerHTML = missions.map(([icon,name,detail,pct]) => `<div class="mission ${pct >= 1 ? 'done' : ''}"><div class="mission-icon">${icon}</div><div><strong>${name}</strong><p>${detail}</p><div class="mission-progress"><i style="width:${pct * 100}%"></i></div></div></div>`).join('');
@@ -794,7 +809,7 @@ function renderPositions() {
 
   const hasContributionHistory = txCache.some(isContribution) || txCache.some(isWithdrawal);
   const autoRow = hasContributionHistory
-    ? `<div class="list-row"><div class="list-icon">↗</div><div class="list-main"><strong>Patrimônio por aportes</strong><small>Automático · aportes realizados menos resgates</small></div><div><div class="money income">${currency.format(positions.contributionAssets)}</div><div class="row-actions"><button class="mini-btn" type="button" data-withdraw-contribution ${positions.contributionAssets > 0 ? '' : 'disabled'}>Mover para saldo</button></div></div></div>`
+    ? `<div class="list-row"><div class="list-icon">↗</div><div class="list-main"><strong>Patrimônio por aportes</strong><small>Automático · integra a reserva de emergência · aportes realizados menos resgates</small></div><div><div class="money income">${currency.format(positions.contributionAssets)}</div><div class="row-actions"><button class="mini-btn" type="button" data-withdraw-contribution ${positions.contributionAssets > 0 ? '' : 'disabled'}>Mover para saldo</button></div></div></div>`
     : '';
   const manualRows = positionsCache.map(item => `<div class="list-row"><div class="list-icon">${item.type === 'debt' ? '−' : '+'}</div><div class="list-main"><strong>${esc(item.name)}</strong><small>${item.type === 'debt' ? 'Dívida' : item.type === 'reserve' ? 'Reserva' : 'Ativo'}</small></div><div><div class="money ${item.type === 'debt' ? 'expense' : 'income'}">${currency.format(safeNumber(item.value))}</div><div class="row-actions"><button class="mini-btn" data-edit-position="${item.id}">Editar</button><button class="mini-btn danger" data-delete-position="${item.id}">Excluir</button></div></div></div>`).join('');
   $('#positionsList').innerHTML = autoRow + manualRows || '<div class="empty-state">Nenhuma posição.</div>';
@@ -812,9 +827,9 @@ function renderPlanning() {
   $('#projectionGrid').innerHTML = [5,10,20,30].map(years => `<div class="projection-item"><span>${years} anos</span><strong>${currency.format(projectFutureValue({ annualRealRate: rate, years, startingValue: positions.netWorth, monthlyContribution: monthly }))}</strong></div>`).join('');
   const reserve = reserveMetrics({ reserve: positions.reserve, transactions: txCache, recurring: recurringCache, todayYmd: ymd(new Date()), targetMonths: safeNumber(settings.reserveTargetMonths) || 6 });
   const items = [];
-  if (positions.contributionAssets > 0) items.push(`Patrimônio formado por aportes: <b>${currency.format(positions.contributionAssets)}</b>, já incluído nos ativos totais.`);
+  if (positions.reserve > 0) items.push(`Reserva considerada: <b>${currency.format(positions.reserve)}</b> = <b>${currency.format(positions.manualReserve)}</b> cadastrados como reserva + <b>${currency.format(positions.contributionAssets)}</b> em aportes líquidos.`);
   if (positions.debts > 0) items.push(`Dívidas cadastradas: <b>${currency.format(positions.debts)}</b>. O saldo devedor entra no patrimônio líquido; parcelas mensais entram apenas no fluxo de caixa.`);
-  if (reserve.months != null) items.push(`Reserva atual cobre <b>${reserve.months.toFixed(1)} meses</b>, usando despesas recorrentes ativas de <b>${currency.format(reserve.monthlyBase)}</b> por mês.`);
+  if (reserve.months != null) items.push(`A reserva atual cobre <b>${reserve.months.toFixed(1)} meses</b>, usando despesas recorrentes ativas de <b>${currency.format(reserve.monthlyBase)}</b> por mês.`);
   if (monthly > 0) items.push(`A projeção usa aporte mensal de <b>${currency.format(monthly)}</b> e retorno real de <b>${rate.toFixed(1)}% a.a.</b>. É um cenário matemático, não uma promessa de retorno.`);
   $('#diagnosis').innerHTML = (items.length ? items : ['Cadastre patrimônio, metas e lançamentos para liberar o diagnóstico.']).map(text => `<div class="diagnosis-item">${text}</div>`).join('');
 }
@@ -1054,16 +1069,23 @@ function exportExcel() {
   const annual = [];
   for (let month = 0; month < 12; month++) {
     const date = new Date(selectedYear, month, 1), m = monthMetrics(txCache, date);
-    annual.push([monthLabel(date), m.income, m.consumption, m.grossContribution, m.withdrawal, m.contribution, m.balance, m.contributionRate ?? 0]);
+    annual.push([monthLabel(date), m.income, m.consumption, monthlySpendingGoal(m.income), m.grossContribution, m.withdrawal, m.contribution, m.balance, m.contributionRate ?? 0]);
   }
   const positions = calcPositions();
   const positionRows = positionsCache.map(p => [p.type, p.name, safeNumber(p.value)]);
   positionRows.push(['asset','Patrimônio por aportes (automático)', positions.contributionAssets]);
+  const goalRows = monthlyGoalsCache.map(g => {
+    const key = g.month || g.id;
+    const date = dateFromMonthKey(key);
+    const metrics = date ? monthMetrics(txCache, date) : { income: 0 };
+    return [key, safeNumber(g.monthlySurplusGoal), metrics.income, monthlySpendingGoal(metrics.income)];
+  });
   const sheets = [
     sheetXml('Resumo',['Indicador','Valor'],[
       ['Ativos totais', positions.assets],
+      ['Reserva cadastrada', positions.manualReserve],
       ['Patrimônio por aportes', positions.contributionAssets],
-      ['Reserva', positions.reserve],
+      ['Reserva total (cadastrada + aportes)', positions.reserve],
       ['Dívidas', positions.debts],
       ['Patrimônio líquido', positions.netWorth]
     ]),
@@ -1071,8 +1093,8 @@ function exportExcel() {
     sheetXml('Patrimônio',['Tipo','Nome','Valor'],positionRows),
     sheetXml('Recorrentes',['Nome','Tipo','Categoria','Valor','Dia','Início','Fim','Ativa'],recurringCache.map(r => [r.name,r.type,r.category,safeNumber(r.amount),r.dayOfMonth,r.startDate,r.endDate || '',r.active ? 'Sim' : 'Não'])),
     sheetXml('Agendadas',['Nome','Tipo','Categoria','Valor','Vencimento','Frequência','Status'],scheduledCache.map(s => [s.name,s.type,s.category,safeNumber(s.amount),s.dueDate,s.frequency,s.status])),
-    sheetXml('Metas mensais',['Mês','Meta de aporte','Limite diário variável'],monthlyGoalsCache.map(g => [g.month || g.id,safeNumber(g.monthlySurplusGoal),safeNumber(g.dailySpendGoal)])),
-    sheetXml(`Ano ${selectedYear}`,['Mês','Receitas','Gastos','Aportes brutos','Resgates','Aporte líquido','Saldo','Taxa de aporte (%)'],annual)
+    sheetXml('Metas mensais',['Mês','Meta de aporte','Renda do mês','Meta de gasto mensal (60%)'],goalRows),
+    sheetXml(`Ano ${selectedYear}`,['Mês','Receitas','Gastos','Meta gasto 60%','Aportes brutos','Resgates','Aporte líquido','Saldo','Taxa de aporte (%)'],annual)
   ];
   const xml = `<?xml version="1.0"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">${sheets.join('')}</Workbook>`;
   const blob = new Blob([xml], { type:'application/vnd.ms-excel;charset=utf-8' });
