@@ -3,9 +3,16 @@ import { getAuth as getFirebaseAuth } from 'firebase-admin/auth';
 import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { createClient } from '@supabase/supabase-js';
 
-const REQUIRED_ENV = ['GOOGLE_APPLICATION_CREDENTIALS', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'];
-for (const name of REQUIRED_ENV) {
+for (const name of ['GOOGLE_APPLICATION_CREDENTIALS', 'SUPABASE_URL']) {
   if (!process.env[name]) throw new Error(`Variável obrigatória ausente: ${name}`);
+}
+
+const SUPABASE_ADMIN_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+if (!SUPABASE_ADMIN_KEY) {
+  throw new Error('Variável obrigatória ausente: SUPABASE_SECRET_KEY');
+}
+if (!SUPABASE_ADMIN_KEY.startsWith('sb_secret_') && !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  throw new Error('SUPABASE_SECRET_KEY deve ser uma chave secreta sb_secret_...');
 }
 
 const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'meupatrimonio-4c878';
@@ -22,7 +29,7 @@ const firebaseAuth = getFirebaseAuth();
 const firestore = getFirestore();
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  SUPABASE_ADMIN_KEY,
   {
     auth: {
       persistSession: false,
