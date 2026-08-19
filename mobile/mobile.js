@@ -73,6 +73,8 @@ let parsed = null;
 let lastCreatedId = '';
 let installPrompt = null;
 let saving = false;
+let loading = false;
+let lastResumeSync = 0;
 
 function toast(message) {
   const el = $('#toast');
@@ -183,19 +185,25 @@ function readEditedParsed() {
 }
 
 async function loadData() {
-  if (!user) return;
+  if (!user || loading) return;
+  loading = true;
   $('#syncBadge').textContent = 'Atualizando';
-  const [txSnap, posSnap, recSnap] = await Promise.all([
-    getDocs(userCol('transactions')),
-    getDocs(userCol('positions')),
-    getDocs(userCol('recurring'))
-  ]);
-  txCache = txSnap.docs.map(item => ({ id:item.id, ...item.data() }));
-  positionsCache = posSnap.docs.map(item => ({ id:item.id, ...item.data() }));
-  recurringCache = recSnap.docs.map(item => ({ id:item.id, ...item.data() }));
-  renderDashboard();
-  renderRecent();
-  $('#syncBadge').textContent = 'Sincronizado';
+  try {
+    const [txSnap, posSnap, recSnap] = await Promise.all([
+      getDocs(userCol('transactions')),
+      getDocs(userCol('positions')),
+      getDocs(userCol('recurring'))
+    ]);
+    txCache = txSnap.docs.map(item => ({ id:item.id, ...item.data() }));
+    positionsCache = posSnap.docs.map(item => ({ id:item.id, ...item.data() }));
+    recurringCache = recSnap.docs.map(item => ({ id:item.id, ...item.data() }));
+    renderDashboard();
+    renderRecent();
+    lastResumeSync = Date.now();
+    $('#syncBadge').textContent = 'Sincronizado';
+  } finally {
+    loading = false;
+  }
 }
 function renderDashboard() {
   const now = new Date(); now.setDate(1);
@@ -220,10 +228,10 @@ function createdAtMillis(value) {
   return safeNumber(value.seconds) * 1000 + safeNumber(value.nanoseconds) / 1000000;
 }
 function compareTransactions(a,b) {
-  const dateOrder = String(b.date || '').localeCompare(String(a.date || ''));
-  if (dateOrder) return dateOrder;
   const createdOrder = createdAtMillis(b.createdAt) - createdAtMillis(a.createdAt);
   if (createdOrder) return createdOrder;
+  const dateOrder = String(b.date || '').localeCompare(String(a.date || ''));
+  if (dateOrder) return dateOrder;
   return String(b.id || '').localeCompare(String(a.id || ''));
 }
 function renderRecent() {
@@ -293,6 +301,12 @@ function startVoice() {
   recognition.start();
 }
 
+async function syncOnResume() {
+  if (!user || saving || loading || Date.now() - lastResumeSync < 1200) return;
+  try { await loadData(); }
+  catch (error) { console.error('Falha ao sincronizar ao retomar.', error); }
+}
+
 $('#smartInput').addEventListener('input', event => renderParsed(parseCommand(event.target.value)));
 $('#smartInput').addEventListener('keydown', event => {
   if (event.key === 'Enter' && !event.shiftKey && parsed) { event.preventDefault(); saveParsed(); }
@@ -340,6 +354,8 @@ $('#installBtn').addEventListener('click', async () => {
   if (!installPrompt) return;
   installPrompt.prompt(); await installPrompt.userChoice; installPrompt = null; $('#installBtn').classList.add('hidden');
 });
+window.addEventListener('focus', syncOnResume);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) syncOnResume(); });
 
 onAuthStateChanged(auth, async current => {
   user = current;
