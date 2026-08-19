@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="robots" content="index,follow" />
+  <title>Excluir conta — Meu Patrimônio</title>
+  <style>
+    :root{color-scheme:dark;background:#07111f;color:#eef6ff;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{margin:0}.wrap{max-width:620px;margin:auto;padding:42px 22px}.card{border:1px solid #18334f;background:#0a192a;border-radius:20px;padding:24px}label{display:block;margin:14px 0;color:#cbd8e6}input{box-sizing:border-box;width:100%;margin-top:7px;padding:13px;border-radius:11px;border:1px solid #2a4865;background:#07111f;color:#fff}button{width:100%;margin-top:16px;padding:14px;border:0;border-radius:12px;background:#d8445f;color:#fff;font-weight:800;cursor:pointer}button:disabled{opacity:.55}.muted{color:#9eb0c3;line-height:1.55}.status{min-height:24px;margin-top:14px}.links{margin-top:18px}a{color:#54d9ff}
+  </style>
+</head>
+<body>
+<main class="wrap">
+  <div class="card">
+    <h1>Excluir conta e dados</h1>
+    <p class="muted">Este é o canal externo de exclusão do Meu Patrimônio. A exclusão remove os dados financeiros conhecidos do Firestore e, em seguida, remove a conta de autenticação. A ação não pode ser desfeita.</p>
+    <form id="deleteForm">
+      <label>E-mail<input id="email" type="email" autocomplete="username" required /></label>
+      <label>Senha atual<input id="password" type="password" autocomplete="current-password" required /></label>
+      <button id="deleteBtn" type="submit">Excluir permanentemente</button>
+    </form>
+    <div id="status" class="status muted" role="status" aria-live="polite"></div>
+    <div class="links"><a href="./privacy-policy.html">Política de Privacidade</a> · <a href="./">Voltar ao Meu Patrimônio</a></div>
+  </div>
+</main>
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-app.js";
+  import { getAuth, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-auth.js";
+  import { getFirestore } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-firestore.js";
+  import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-app-check.js";
+  import { firebaseConfig, appCheckSiteKey } from "./firebase-config.js";
+  import { deleteCurrentUserAccount } from "./account-deletion.js";
+
+  const app = initializeApp(firebaseConfig);
+  if (appCheckSiteKey) {
+    try {
+      initializeAppCheck(app, { provider:new ReCaptchaEnterpriseProvider(appCheckSiteKey), isTokenAutoRefreshEnabled:true });
+    } catch (error) { console.warn('App Check indisponível.', error); }
+  }
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+  const form = document.querySelector('#deleteForm');
+  const button = document.querySelector('#deleteBtn');
+  const status = document.querySelector('#status');
+  const setStatus = (message, error=false) => { status.textContent = message; status.style.color = error ? '#ff9aa2' : ''; };
+
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const email = document.querySelector('#email').value.trim();
+    const password = document.querySelector('#password').value;
+    if (!window.confirm('Excluir permanentemente sua conta e seus dados do Meu Patrimônio?')) return;
+    button.disabled = true;
+    setStatus('Validando identidade e removendo dados...');
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      await deleteCurrentUserAccount({ auth, db, password });
+      form.reset();
+      setStatus('Conta e dados excluídos com sucesso.');
+    } catch (error) {
+      console.error(error);
+      await signOut(auth).catch(() => {});
+      const code = String(error?.code || error?.message || '');
+      if (code.includes('invalid-credential') || code.includes('wrong-password') || code.includes('user-not-found')) setStatus('E-mail ou senha inválidos.', true);
+      else if (code.includes('permission-denied')) setStatus('A exclusão foi bloqueada pelas regras atuais do Firebase. Nenhuma exclusão parcial foi concluída por este fluxo.', true);
+      else setStatus('Não foi possível concluir a exclusão. Tente novamente mais tarde.', true);
+    } finally {
+      button.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>
