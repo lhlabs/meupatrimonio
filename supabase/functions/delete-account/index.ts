@@ -22,11 +22,11 @@ Deno.serve(async (req: Request) => {
 
   const url = Deno.env.get('SUPABASE_URL') || '';
   const publishableKeys = JSON.parse(Deno.env.get('SUPABASE_PUBLISHABLE_KEYS') || '{}');
-  const publishableKeyName = publishableKeys.default;
-  const publishableKey = publishableKeyName ? Deno.env.get(publishableKeyName) || '' : '';
-  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+  const secretKeys = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') || '{}');
+  const publishableKey = publishableKeys.default || '';
+  const secretKey = secretKeys.default || '';
 
-  if (!url || !publishableKey || !serviceRoleKey) {
+  if (!url || !publishableKey || !secretKey) {
     return json({ error: 'Server configuration unavailable' }, 500);
   }
 
@@ -39,7 +39,7 @@ Deno.serve(async (req: Request) => {
   const { data: userData, error: userError } = await userClient.auth.getUser(token);
   if (userError || !userData.user) return json({ error: 'Unauthorized' }, 401);
 
-  const admin = createClient(url, serviceRoleKey, {
+  const admin = createClient(url, secretKey, {
     auth: { persistSession: false, autoRefreshToken: false }
   });
 
