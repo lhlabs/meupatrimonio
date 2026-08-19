@@ -129,7 +129,7 @@ test('recurring commitments starting later in the current month already count to
   assert.equal(r.months,3);
 });
 
-test('period spending contains only realized expenses and excludes contributions', () => {
+test('period spending includes active recurring commitments and excludes contributions', () => {
   const tx=[
     {type:'expense',amount:1200,date:'2026-08-05',category:'Moradia',sourceType:'recurring'},
     {type:'expense',amount:300,date:'2026-08-10',category:'Mercado'},
@@ -141,9 +141,9 @@ test('period spending contains only realized expenses and excludes contributions
     {active:true,type:'expense',amount:800,dayOfMonth:25,category:'Veículo',startDate:'2026-01-01',endDate:''}
   ];
   const result=periodSpendingMetrics(tx,recurring,new Date(2026,7,1),new Date(2026,7,19));
-  assert.equal(result.recurringExpenses,1200);
+  assert.equal(result.recurringExpenses,2000);
   assert.equal(result.otherExpenses,500);
-  assert.equal(result.totalExpenses,1700);
+  assert.equal(result.totalExpenses,2500);
 });
 
 test('past period spending uses realized recurring expenses', () => {
