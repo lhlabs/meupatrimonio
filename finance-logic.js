@@ -65,15 +65,15 @@ export function monthMetrics(transactions, date) {
   const rows = monthRows(transactions, date);
   const income = rows.filter(item => item.type === 'income' && !isWithdrawal(item)).reduce((sum, item) => sum + safeNumber(item.amount), 0);
   const withdrawal = rows.filter(isWithdrawal).reduce((sum, item) => sum + safeNumber(item.amount), 0);
-  const contribution = rows.filter(isContribution).reduce((sum, item) => sum + safeNumber(item.amount), 0);
-  const netContribution = contribution - withdrawal;
+  const grossContribution = rows.filter(isContribution).reduce((sum, item) => sum + safeNumber(item.amount), 0);
+  const contribution = grossContribution - withdrawal;
   const consumption = rows.filter(item => item.type === 'expense' && !isContribution(item)).reduce((sum, item) => sum + safeNumber(item.amount), 0);
   const variableConsumption = rows.filter(isVariableConsumption).reduce((sum, item) => sum + safeNumber(item.amount), 0);
   const cashIn = income + withdrawal;
-  const totalOut = contribution + consumption;
+  const totalOut = grossContribution + consumption;
   const balance = cashIn - totalOut;
-  const contributionRate = income > 0 ? netContribution / income * 100 : null;
-  return { rows, income, withdrawal, cashIn, contribution, netContribution, consumption, variableConsumption, totalOut, balance, contributionRate };
+  const contributionRate = income > 0 ? contribution / income * 100 : null;
+  return { rows, income, withdrawal, cashIn, grossContribution, contribution, netContribution: contribution, consumption, variableConsumption, totalOut, balance, contributionRate };
 }
 
 export function daysElapsedInMonth(date, now = new Date()) {
