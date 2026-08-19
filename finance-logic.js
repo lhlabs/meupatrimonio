@@ -105,6 +105,14 @@ export function monthlySpendingGoal(income, ratio = MONTHLY_SPENDING_RATIO) {
   return Math.max(0, safeNumber(income)) * clamp(safeNumber(ratio), 0, 1);
 }
 
+export function shouldMaterializeRecurring(due, todayYmd) {
+  const dueMonth = String(due || '').slice(0, 7);
+  const currentMonth = String(todayYmd || '').slice(0, 7);
+  return /^\d{4}-\d{2}$/.test(dueMonth)
+    && /^\d{4}-\d{2}$/.test(currentMonth)
+    && dueMonth <= currentMonth;
+}
+
 export function daysElapsedInMonth(date, now = new Date()) {
   const isCurrent = date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
   return isCurrent ? Math.max(1, now.getDate()) : new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
@@ -155,34 +163,17 @@ export function recurringExpenseTotalForMonth(recurring, date) {
 }
 
 export function periodSpendingMetrics(transactions, recurring, date, now = new Date()) {
+  void recurring;
+  void now;
   const rows = monthRows(transactions, date);
-  const currentKey = monthKey(now);
-  const requestedKey = monthKey(date);
-  const isPastMonth = requestedKey < currentKey;
-
-  // Lançamentos recorrentes automáticos e lançamentos manuais que originaram
-  // uma recorrência pertencem à mesma parcela do gasto. Assim o mês inicial
-  // de uma recorrência legacy não é contado novamente como "demais gastos".
-  const realizedRecurring = rows
+  const recurringExpenses = rows
     .filter(item => item?.type === 'expense' && !isContribution(item))
     .filter(item => item.sourceType === 'recurring' || item.recurring === true)
     .reduce((sum, item) => sum + safeNumber(item.amount), 0);
-
-  // No mês atual, o gasto mensal precisa refletir todos os compromissos
-  // recorrentes ativos, mesmo os que ainda não venceram. Em meses passados,
-  // preservamos o realizado para não reescrever o histórico com valores atuais.
-  const definedRecurring = requestedKey === currentKey
-    ? activeRecurringExpenseTotal(recurring, ymd(now))
-    : recurringExpenseTotalForMonth(recurring, date);
-  const recurringExpenses = isPastMonth
-    ? realizedRecurring
-    : Math.max(realizedRecurring, definedRecurring);
-
   const otherExpenses = rows
     .filter(item => item?.type === 'expense' && !isContribution(item))
     .filter(item => item.sourceType !== 'recurring' && item.recurring !== true)
     .reduce((sum, item) => sum + safeNumber(item.amount), 0);
-
   return {
     recurringExpenses,
     otherExpenses,
