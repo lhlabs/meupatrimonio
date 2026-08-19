@@ -23,9 +23,26 @@ service cloud.firestore {
     function validDate(v) { return v is string && v.matches('^\\d{4}-\\d{2}-\\d{2}$'); }
     function validMonth(v) { return v is string && v.matches('^\\d{4}-\\d{2}$'); }
     function validMoney(v) { return v is number && v >= 0 && v < 1000000000; }
+    function validDocumentId(v) { return v is string && v.matches('^[A-Za-z0-9_-]{1,160}$'); }
     function createdNow() { return request.resource.data.createdAt == request.time; }
     function createdAtUnchanged() { return request.resource.data.createdAt == resource.data.createdAt; }
     function updatedNow() { return request.resource.data.updatedAt == request.time; }
+
+    function validBaseCategory(type, category) {
+      return category is string
+        && ((type == 'expense' && category in [
+          'Moradia','Mercado','Restaurantes','Transporte','Veículo','Saúde','Academia','Pets',
+          'Assinaturas','Lazer','Compras','Impostos','Seguros','Educação','Viagens',
+          'Investimentos/Aportes','Outros'
+        ]) || (type == 'income' && category in [
+          'Salário','Benefícios','Renda extra','Investimentos','Reembolso','Venda','Outros'
+        ]));
+    }
+
+    function validTransactionCategory(type, category) {
+      return validBaseCategory(type, category)
+        || (type == 'income' && category == 'Resgate de Patrimônio');
+    }
 
     function validTransaction() {
       return request.resource.data.keys().hasOnly(['type','amount','category','description','date','recurring','sourceType','sourceId','createdAt'])
@@ -33,7 +50,7 @@ service cloud.firestore {
         && request.resource.data.type in ['income','expense']
         && request.resource.data.amount is number && request.resource.data.amount > 0 && request.resource.data.amount < 100000000
         && validDate(request.resource.data.date)
-        && request.resource.data.category is string && request.resource.data.category.size() > 0 && request.resource.data.category.size() <= 40
+        && validTransactionCategory(request.resource.data.type, request.resource.data.category)
         && request.resource.data.description is string && request.resource.data.description.size() <= 80
         && request.resource.data.recurring is bool
         && (!request.resource.data.keys().hasAny(['sourceType']) || request.resource.data.sourceType in ['recurring','scheduled'])
@@ -78,7 +95,7 @@ service cloud.firestore {
         && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 60
         && request.resource.data.type in ['income','expense']
         && request.resource.data.amount is number && request.resource.data.amount > 0 && request.resource.data.amount < 100000000
-        && request.resource.data.category is string && request.resource.data.category.size() > 0 && request.resource.data.category.size() <= 40
+        && validBaseCategory(request.resource.data.type, request.resource.data.category)
         && request.resource.data.description is string && request.resource.data.description.size() <= 80
         && request.resource.data.dayOfMonth is number && request.resource.data.dayOfMonth >= 1 && request.resource.data.dayOfMonth <= 31
         && validDate(request.resource.data.startDate)
@@ -93,7 +110,7 @@ service cloud.firestore {
         && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 60
         && request.resource.data.type in ['income','expense']
         && request.resource.data.amount is number && request.resource.data.amount > 0 && request.resource.data.amount < 100000000
-        && request.resource.data.category is string && request.resource.data.category.size() > 0 && request.resource.data.category.size() <= 40
+        && validBaseCategory(request.resource.data.type, request.resource.data.category)
         && request.resource.data.description is string && request.resource.data.description.size() <= 80
         && validDate(request.resource.data.dueDate)
         && request.resource.data.frequency in ['once','annual']
@@ -116,14 +133,14 @@ service cloud.firestore {
 
       match /transactions/{txId} {
         allow read, delete: if canUsePrivateData(userId);
-        allow create: if canUsePrivateData(userId) && validTransaction() && createdNow();
-        allow update: if canUsePrivateData(userId) && validTransaction() && createdAtUnchanged();
+        allow create: if canUsePrivateData(userId) && validDocumentId(txId) && validTransaction() && createdNow();
+        allow update: if canUsePrivateData(userId) && validDocumentId(txId) && validTransaction() && createdAtUnchanged();
       }
 
       match /positions/{positionId} {
         allow read, delete: if canUsePrivateData(userId);
-        allow create: if canUsePrivateData(userId) && validPosition() && createdNow();
-        allow update: if canUsePrivateData(userId) && validPosition() && createdAtUnchanged();
+        allow create: if canUsePrivateData(userId) && validDocumentId(positionId) && validPosition() && createdNow();
+        allow update: if canUsePrivateData(userId) && validDocumentId(positionId) && validPosition() && createdAtUnchanged();
       }
 
       match /config/planning {
@@ -141,14 +158,14 @@ service cloud.firestore {
 
       match /recurring/{recurringId} {
         allow read, delete: if canUsePrivateData(userId);
-        allow create: if canUsePrivateData(userId) && validRecurring() && createdNow() && updatedNow();
-        allow update: if canUsePrivateData(userId) && validRecurring() && createdAtUnchanged() && updatedNow();
+        allow create: if canUsePrivateData(userId) && validDocumentId(recurringId) && validRecurring() && createdNow() && updatedNow();
+        allow update: if canUsePrivateData(userId) && validDocumentId(recurringId) && validRecurring() && createdAtUnchanged() && updatedNow();
       }
 
       match /scheduled/{scheduledId} {
         allow read, delete: if canUsePrivateData(userId);
-        allow create: if canUsePrivateData(userId) && validScheduled() && createdNow() && updatedNow();
-        allow update: if canUsePrivateData(userId) && validScheduled() && createdAtUnchanged() && updatedNow();
+        allow create: if canUsePrivateData(userId) && validDocumentId(scheduledId) && validScheduled() && createdNow() && updatedNow();
+        allow update: if canUsePrivateData(userId) && validDocumentId(scheduledId) && validScheduled() && createdAtUnchanged() && updatedNow();
       }
     }
 
