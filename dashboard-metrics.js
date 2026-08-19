@@ -1,7 +1,7 @@
 import { getApps, getApp } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-app.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-auth.js";
 import { getFirestore, collection, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-firestore.js";
-import { clamp, monthMetrics, periodSpendingMetrics, safeNumber } from "./finance-logic.js";
+import { monthMetrics, periodSpendingMetrics, positionMetrics, reserveMetrics, safeNumber, ymd } from "./finance-logic.js";
 
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const monthNames = Array.from({ length: 12 }, (_, month) =>
@@ -15,6 +15,7 @@ let latestPlanning = {};
 let unsubs = [];
 let renderTimer = null;
 let observerInstalled = false;
+let authObserverInstalled = false;
 
 function selectedMonthFromUi() {
   const text = String(document.querySelector('#monthLabel')?.textContent || '').toLowerCase();
@@ -26,20 +27,9 @@ function selectedMonthFromUi() {
   return fallback;
 }
 
-function currentMonth() {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), 1);
-}
-
 function setText(target, value) {
   const element = typeof target === 'string' ? document.querySelector(target) : target;
   if (element && element.textContent !== value) element.textContent = value;
-}
-
-function reserveValue() {
-  return latestPositions
-    .filter(item => item?.type === 'reserve')
-    .reduce((sum, item) => sum + safeNumber(item.value), 0);
 }
 
 function renderDashboardMetrics() {
@@ -62,23 +52,25 @@ function renderDashboardMetrics() {
   setText(spendingValue, currency.format(spending.totalExpenses));
   setText(spendingDetail, `${currency.format(spending.recurringExpenses)} recorrentes + ${currency.format(spending.otherExpenses)} demais`);
 
-  // Reserva e card de gastos usam a mesma base recorrente. A referência da reserva é sempre o mês corrente real.
-  const currentSpending = periodSpendingMetrics(latestTransactions, latestRecurring, currentMonth());
-  const monthlyRecurring = currentSpending.recurringExpenses;
+  const today = ymd(new Date());
+  const positions = positionMetrics(latestPositions, latestTransactions, today);
   const targetMonths = Math.max(1, safeNumber(latestPlanning.reserveTargetMonths) || 6);
-  const currentReserve = reserveValue();
+  const reserve = reserveMetrics({
+    reserve: positions.reserve,
+    transactions: latestTransactions,
+    recurring: latestRecurring,
+    todayYmd: today,
+    targetMonths
+  });
 
-  if (monthlyRecurring > 0) {
-    const target = monthlyRecurring * targetMonths;
-    const months = currentReserve / monthlyRecurring;
-    const progress = clamp(currentReserve / target, 0, 1);
-    setText('#reserveMonths', `${months.toFixed(1)} / ${targetMonths} meses`);
-    setText('#reserveValue', `${currency.format(currentReserve)} de ${currency.format(target)}`);
-    setText('#freedomPercent', `${Math.round(progress * 100)}%`);
-    document.querySelector('#freedomRing')?.style.setProperty('--p', `${progress * 100}%`);
-    setText('#freedomTarget', currency.format(target));
-    setText('#freedomGap', currency.format(Math.max(0, target - currentReserve)));
-    setText('#freedomBadge', `Reserva ${months.toFixed(1)} meses`);
+  if (reserve.progress != null) {
+    setText('#reserveMonths', `${reserve.months.toFixed(1)} / ${targetMonths} meses`);
+    setText('#reserveValue', `${currency.format(positions.reserve)} de ${currency.format(reserve.target)}`);
+    setText('#freedomPercent', `${Math.round(reserve.progress * 100)}%`);
+    document.querySelector('#freedomRing')?.style.setProperty('--p', `${reserve.progress * 100}%`);
+    setText('#freedomTarget', currency.format(reserve.target));
+    setText('#freedomGap', currency.format(Math.max(0, reserve.target - positions.reserve)));
+    setText('#freedomBadge', `Reserva ${reserve.months.toFixed(1)} meses`);
   } else {
     setText('#reserveMonths', '—');
     setText('#reserveValue', 'Cadastre despesas recorrentes');
@@ -90,14 +82,10 @@ function renderDashboardMetrics() {
   }
 }
 
-function scheduleRender(delay = 30) {
+function scheduleRender(delay = 20) {
   clearTimeout(renderTimer);
   renderTimer = setTimeout(() => {
-    requestAnimationFrame(() => {
-      renderDashboardMetrics();
-      // Garante que este cálculo vença um render assíncrono do módulo principal.
-      setTimeout(renderDashboardMetrics, 120);
-    });
+    requestAnimationFrame(renderDashboardMetrics);
   }, delay);
 }
 
@@ -130,21 +118,30 @@ function subscribe(uid) {
 function installObserver() {
   if (observerInstalled) return;
   observerInstalled = true;
-  const targets = ['#monthLabel', '#monthBalance', '#reserveMonths', '#debtValue']
+  const targets = ['#monthLabel', '#monthBalance', '#reserveMonths', '#reserveValue', '#debtValue', '#debtRatio']
     .map(selector => document.querySelector(selector))
     .filter(Boolean);
   if (!targets.length) return;
-  const observer = new MutationObserver(() => scheduleRender(20));
+  const observer = new MutationObserver(() => scheduleRender());
   targets.forEach(element => observer.observe(element, { childList: true, characterData: true, subtree: true }));
 }
 
 function startWhenReady() {
   if (!getApps().length) return false;
   installObserver();
-  onAuthStateChanged(getAuth(getApp()), currentUser => {
-    if (currentUser) subscribe(currentUser.uid);
-    else stopSubscriptions();
-  });
+  if (!authObserverInstalled) {
+    authObserverInstalled = true;
+    onAuthStateChanged(getAuth(getApp()), currentUser => {
+      if (currentUser) subscribe(currentUser.uid);
+      else {
+        stopSubscriptions();
+        latestTransactions = [];
+        latestRecurring = [];
+        latestPositions = [];
+        latestPlanning = {};
+      }
+    });
+  }
   return true;
 }
 
