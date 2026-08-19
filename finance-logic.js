@@ -111,10 +111,7 @@ export function activeRecurringExpenseTotal(recurring, todayYmd) {
   const referenceMonth = referenceDay.slice(0, 7);
   return recurring
     .filter(item => item?.active === true && item.type === 'expense' && !isContribution(item) && safeNumber(item.amount) > 0)
-    // Para a reserva, uma recorrência que começa em qualquer dia do mês corrente já é uma obrigação mensal conhecida.
-    // Recorrências que começam somente em meses futuros continuam fora da base.
     .filter(item => !item.startDate || String(item.startDate).slice(0, 7) <= referenceMonth)
-    // Uma recorrência já encerrada antes de hoje não deve continuar compondo a reserva.
     .filter(item => !item.endDate || String(item.endDate) >= referenceDay)
     .reduce((sum, item) => sum + safeNumber(item.amount), 0);
 }
@@ -169,10 +166,13 @@ export function completedConsumptionHistory(transactions, todayYmd = ymd(new Dat
 }
 
 export function reserveMetrics({ reserve, transactions, recurring, referenceDate = new Date(), todayYmd = ymd(new Date()), targetMonths = 6 }) {
-  // Reserva de emergência: objetivo exclusivo de cobrir as despesas recorrentes ativas.
-  // O histórico permanece apenas como informação observada e nunca altera a meta da reserva.
+  // A reserva usa exatamente a mesma base de recorrências cadastradas usada pelo resumo mensal.
+  // Navegar para outro mês no dashboard não altera a meta: a referência é sempre o mês corrente real.
   void referenceDate;
-  const recurringBase = activeRecurringExpenseTotal(recurring, todayYmd);
+  const [year, month] = String(todayYmd).split('-').map(Number);
+  const currentMonth = Number.isFinite(year) && Number.isFinite(month) ? new Date(year, month - 1, 1) : new Date();
+  currentMonth.setDate(1);
+  const recurringBase = recurringExpenseTotalForMonth(recurring, currentMonth);
   const history = completedConsumptionHistory(transactions, todayYmd, 6);
   const monthlyBase = recurringBase;
   const months = monthlyBase > 0 ? safeNumber(reserve) / monthlyBase : null;
