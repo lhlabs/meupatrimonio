@@ -1,5 +1,5 @@
-const CACHE='meu-patrimonio-v29';
-const FILES=['./','./index.html','./styles.css','./styles.base.css','./app.js','./registration.js','./security-hardening.js','./privacy-controls.js','./dashboard-metrics.js','./finance-logic.js','./firebase-config.js','./manifest.webmanifest','./icon.svg'];
+const CACHE='meu-patrimonio-v30';
+const FILES=['./','./index.html','./styles.css','./styles.base.css','./app.js','./registration.js','./security-hardening.js','./privacy-controls.js','./dashboard-metrics.js','./finance-logic.js','./firebase-config.js','./supabase-config.js','./supabase-client.js','./compat/firebase-app.js','./compat/firebase-auth.js','./compat/firebase-firestore.js','./compat/firebase-app-check.js','./manifest.webmanifest','./icon.svg'];
 self.addEventListener('install',event=>{self.skipWaiting();event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(FILES)))});
 self.addEventListener('activate',event=>{event.waitUntil(Promise.all([caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))),self.clients.claim()]))});
 self.addEventListener('fetch',event=>{if(event.request.method!=='GET')return;const url=new URL(event.request.url);if(url.origin===location.origin)event.respondWith(fetch(event.request).then(response=>{if(response.ok){const copy=response.clone();caches.open(CACHE).then(cache=>cache.put(event.request,copy)).catch(()=>{});}return response;}).catch(()=>caches.match(event.request)))});
