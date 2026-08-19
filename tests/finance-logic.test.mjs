@@ -45,6 +45,8 @@ test('withdrawal moves patrimony back to monthly cash without becoming income', 
   assert.equal(m.income, 5000);
   assert.equal(m.withdrawal, 400);
   assert.equal(m.cashIn, 5400);
+  assert.equal(m.grossContribution, 1000);
+  assert.equal(m.contribution, 600);
   assert.equal(m.netContribution, 600);
   assert.equal(m.balance, 4100);
   assert.equal(m.contributionRate, 12);
