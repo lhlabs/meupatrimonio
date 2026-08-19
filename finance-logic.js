@@ -155,15 +155,34 @@ export function recurringExpenseTotalForMonth(recurring, date) {
 }
 
 export function periodSpendingMetrics(transactions, recurring, date, now = new Date()) {
-  void recurring;
-  void now;
   const rows = monthRows(transactions, date);
-  const recurringExpenses = rows
-    .filter(item => item?.type === 'expense' && item.sourceType === 'recurring' && !isContribution(item))
+  const currentKey = monthKey(now);
+  const requestedKey = monthKey(date);
+  const isPastMonth = requestedKey < currentKey;
+
+  // Lançamentos recorrentes automáticos e lançamentos manuais que originaram
+  // uma recorrência pertencem à mesma parcela do gasto. Assim o mês inicial
+  // de uma recorrência legacy não é contado novamente como "demais gastos".
+  const realizedRecurring = rows
+    .filter(item => item?.type === 'expense' && !isContribution(item))
+    .filter(item => item.sourceType === 'recurring' || item.recurring === true)
     .reduce((sum, item) => sum + safeNumber(item.amount), 0);
+
+  // No mês atual, o gasto mensal precisa refletir todos os compromissos
+  // recorrentes ativos, mesmo os que ainda não venceram. Em meses passados,
+  // preservamos o realizado para não reescrever o histórico com valores atuais.
+  const definedRecurring = requestedKey === currentKey
+    ? activeRecurringExpenseTotal(recurring, ymd(now))
+    : recurringExpenseTotalForMonth(recurring, date);
+  const recurringExpenses = isPastMonth
+    ? realizedRecurring
+    : Math.max(realizedRecurring, definedRecurring);
+
   const otherExpenses = rows
-    .filter(item => item?.type === 'expense' && item.sourceType !== 'recurring' && !isContribution(item))
+    .filter(item => item?.type === 'expense' && !isContribution(item))
+    .filter(item => item.sourceType !== 'recurring' && item.recurring !== true)
     .reduce((sum, item) => sum + safeNumber(item.amount), 0);
+
   return {
     recurringExpenses,
     otherExpenses,
