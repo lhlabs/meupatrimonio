@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   dueDateFor, addYear, isContribution, isWithdrawal, contributionBalance, monthMetrics,
   nextRecurringDue, activeRecurringExpenseTotal, completedConsumptionHistory,
-  reserveMetrics, scoreMetrics, projectFutureValue
+  periodSpendingMetrics, reserveMetrics, scoreMetrics, projectFutureValue
 } from '../finance-logic.js';
 
 test('dueDateFor clamps invalid month-end days', () => {
@@ -102,6 +102,37 @@ test('future recurring commitments do not inflate current reserve base', () => {
   assert.equal(activeRecurringExpenseTotal(recurring,'2026-08-18'),500);
 });
 
+test('period spending is recurring commitments plus other period expenses', () => {
+  const tx=[
+    {type:'expense',amount:1200,date:'2026-08-05',category:'Moradia',sourceType:'recurring'},
+    {type:'expense',amount:300,date:'2026-08-10',category:'Mercado'},
+    {type:'expense',amount:200,date:'2026-08-12',category:'Academia',sourceType:'scheduled'},
+    {type:'expense',amount:1000,date:'2026-08-15',category:'Investimentos/Aportes'}
+  ];
+  const recurring=[
+    {active:true,type:'expense',amount:1200,dayOfMonth:5,category:'Moradia',startDate:'2026-01-01',endDate:''},
+    {active:true,type:'expense',amount:800,dayOfMonth:25,category:'Veículo',startDate:'2026-01-01',endDate:''}
+  ];
+  const result=periodSpendingMetrics(tx,recurring,new Date(2026,7,1),new Date(2026,7,19));
+  assert.equal(result.recurringExpenses,2000);
+  assert.equal(result.otherExpenses,500);
+  assert.equal(result.totalExpenses,2500);
+});
+
+test('past period spending prefers realized recurring expenses', () => {
+  const tx=[
+    {type:'expense',amount:900,date:'2026-07-05',category:'Moradia',sourceType:'recurring'},
+    {type:'expense',amount:100,date:'2026-07-08',category:'Mercado'}
+  ];
+  const recurring=[
+    {active:true,type:'expense',amount:1500,dayOfMonth:5,category:'Moradia',startDate:'2026-01-01',endDate:''}
+  ];
+  const result=periodSpendingMetrics(tx,recurring,new Date(2026,6,1),new Date(2026,7,19));
+  assert.equal(result.recurringExpenses,900);
+  assert.equal(result.otherExpenses,100);
+  assert.equal(result.totalExpenses,1000);
+});
+
 test('completed consumption history ignores the current partial month', () => {
   const tx=[
     {type:'expense',amount:6397,date:'2026-08-10',category:'Mercado'},
@@ -125,18 +156,7 @@ test('reserve target is stable when user navigates from August to September', ()
   assert.equal(september.target,august.target);
 });
 
-test('one completed high-spend month does not override known recurring reserve base', () => {
-  const tx=[{type:'expense',amount:6397,date:'2026-08-10',category:'Mercado'}];
-  const recurring=[{active:true,type:'expense',amount:2000,category:'Moradia',startDate:'2026-01-01',endDate:''}];
-  const r=reserveMetrics({reserve:20000,transactions:tx,recurring,referenceDate:new Date(2026,9,1),todayYmd:'2026-09-01',targetMonths:6});
-  assert.equal(r.historyMonths,1);
-  assert.equal(r.observedHistoricalBase,6397);
-  assert.equal(r.historicalBase,0);
-  assert.equal(r.monthlyBase,2000);
-  assert.equal(r.target,12000);
-});
-
-test('reserve base can use mature historical consumption when at least three months exist', () => {
+test('high historical spending never overrides recurring reserve base', () => {
   const tx=[
     {type:'expense',amount:3000,date:'2026-07-10',category:'Mercado'},
     {type:'expense',amount:3000,date:'2026-06-10',category:'Mercado'},
@@ -145,10 +165,25 @@ test('reserve base can use mature historical consumption when at least three mon
   const recurring=[{active:true,type:'expense',amount:2000,category:'Moradia',startDate:'2026-01-01',endDate:''}];
   const r=reserveMetrics({reserve:18000,transactions:tx,recurring,todayYmd:'2026-08-18',targetMonths:6});
   assert.equal(r.historyMonths,3);
-  assert.equal(r.historicalBase,3000);
-  assert.equal(r.monthlyBase,3000);
-  assert.equal(r.target,18000);
+  assert.equal(r.observedHistoricalBase,3000);
+  assert.equal(r.historicalBase,0);
+  assert.equal(r.monthlyBase,2000);
+  assert.equal(r.target,12000);
   assert.equal(r.progress,1);
+  assert.equal(r.months,9);
+});
+
+test('reserve target is exactly six months of recurring expenses when configured for six months', () => {
+  const recurring=[
+    {active:true,type:'expense',amount:1200,category:'Moradia',startDate:'2026-01-01',endDate:''},
+    {active:true,type:'expense',amount:800,category:'Veículo',startDate:'2026-01-01',endDate:''}
+  ];
+  const r=reserveMetrics({reserve:6000,transactions:[],recurring,todayYmd:'2026-08-19',targetMonths:6});
+  assert.equal(r.recurringBase,2000);
+  assert.equal(r.monthlyBase,2000);
+  assert.equal(r.target,12000);
+  assert.equal(r.months,3);
+  assert.equal(r.progress,0.5);
 });
 
 test('score requires the two user-controlled monthly goals', () => {
