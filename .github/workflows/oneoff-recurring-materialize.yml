@@ -1,0 +1,57 @@
+name: One-off recurring materialization patch
+
+on:
+  push:
+    branches: [agent/antecipa-recorrencias-do-mes]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: agent/antecipa-recorrencias-do-mes
+      - name: Patch app and cache
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const replaceOrFail = (text, from, to, label) => {
+            if (!text.includes(from)) throw new Error(`Trecho não encontrado: ${label}`);
+            return text.replace(from, to);
+          };
+          let app = fs.readFileSync('app.js', 'utf8');
+          if (!app.includes('shouldMaterializeRecurring')) {
+            app = replaceOrFail(
+              app,
+              'recurringDue, reserveMetrics, safeNumber, scoreMetrics, ymd',
+              'recurringDue, reserveMetrics, safeNumber, scoreMetrics, shouldMaterializeRecurring, ymd',
+              'import shouldMaterializeRecurring'
+            );
+          }
+          app = replaceOrFail(
+            app,
+            '      if (due > today) break;',
+            '      if (!shouldMaterializeRecurring(due, today)) break;',
+            'materialização antecipada da recorrência'
+          );
+          fs.writeFileSync('app.js', app);
+
+          let sw = fs.readFileSync('sw.js', 'utf8');
+          sw = sw.replace("const CACHE='meu-patrimonio-v24';", "const CACHE='meu-patrimonio-v25';");
+          fs.writeFileSync('sw.js', sw);
+          NODE
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.js sw.js
+          git diff --cached --check
+          if ! git diff --cached --quiet; then
+            git commit -m "Antecipa recorrências do mês nos lançamentos"
+            git push origin HEAD:agent/antecipa-recorrencias-do-mes
+          fi
