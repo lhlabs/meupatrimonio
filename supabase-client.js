@@ -1,4 +1,4 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.112.2?bundle';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.112.3?bundle';
 import { supabaseUrl, supabasePublishableKey, hasSupabaseConfig } from './supabase-config.js';
 
 if (!hasSupabaseConfig()) {
