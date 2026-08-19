@@ -111,6 +111,8 @@ export function dailyVariableAverage(transactions, date, now = new Date()) {
 export function recurringDue(recurring, date) {
   if (!recurring?.active) return null;
   const due = dueDateFor(date.getFullYear(), date.getMonth(), recurring.dayOfMonth);
+  const startMonth = String(recurring.startDate || '').slice(0, 7);
+  if (String(recurring.id || '').startsWith('legacy_') && startMonth && due.slice(0, 7) === startMonth) return null;
   if (recurring.startDate && due < recurring.startDate) return null;
   if (recurring.endDate && due > recurring.endDate) return null;
   return due;
