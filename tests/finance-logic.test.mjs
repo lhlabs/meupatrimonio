@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  dueDateFor, addYear, isContribution, monthMetrics, nextRecurringDue,
-  activeRecurringExpenseTotal, reserveMetrics, scoreMetrics, projectFutureValue
+  dueDateFor, addYear, isContribution, isWithdrawal, contributionBalance, monthMetrics,
+  nextRecurringDue, activeRecurringExpenseTotal, reserveMetrics, scoreMetrics, projectFutureValue
 } from '../finance-logic.js';
 
 test('dueDateFor clamps invalid month-end days', () => {
@@ -24,11 +24,50 @@ test('contributions are separated from consumption and cash balance', () => {
   const m = monthMetrics(tx, new Date(2026,7,1));
   assert.equal(m.income, 5000);
   assert.equal(m.contribution, 1000);
+  assert.equal(m.netContribution, 1000);
+  assert.equal(m.withdrawal, 0);
   assert.equal(m.consumption, 1500);
   assert.equal(m.variableConsumption, 300);
   assert.equal(m.balance, 2500);
   assert.equal(m.contributionRate, 20);
   assert.equal(isContribution(tx[1]), true);
+});
+
+test('withdrawal moves patrimony back to monthly cash without becoming income', () => {
+  const tx = [
+    {type:'income', amount:5000, date:'2026-08-01', category:'Salário'},
+    {type:'expense', amount:1000, date:'2026-08-02', category:'Investimentos/Aportes'},
+    {type:'income', amount:400, date:'2026-08-10', category:'Resgate de Patrimônio'},
+    {type:'expense', amount:300, date:'2026-08-11', category:'Mercado'}
+  ];
+  const m = monthMetrics(tx, new Date(2026,7,1));
+  assert.equal(isWithdrawal(tx[2]), true);
+  assert.equal(m.income, 5000);
+  assert.equal(m.withdrawal, 400);
+  assert.equal(m.cashIn, 5400);
+  assert.equal(m.grossContribution, 1000);
+  assert.equal(m.contribution, 600);
+  assert.equal(m.netContribution, 600);
+  assert.equal(m.balance, 4100);
+  assert.equal(m.contributionRate, 12);
+  assert.equal(contributionBalance(tx), 600);
+});
+
+test('deleting a contribution automatically lowers derived patrimony', () => {
+  const tx = [
+    {id:'a',type:'expense',amount:1000,date:'2026-08-02',category:'Investimentos/Aportes'},
+    {id:'b',type:'expense',amount:500,date:'2026-08-09',category:'Investimentos/Aportes'}
+  ];
+  assert.equal(contributionBalance(tx),1500);
+  assert.equal(contributionBalance(tx.filter(item=>item.id!=='b')),1000);
+});
+
+test('derived patrimony never becomes negative after withdrawals', () => {
+  const tx = [
+    {type:'expense',amount:500,date:'2026-08-01',category:'Investimentos/Aportes'},
+    {type:'income',amount:700,date:'2026-08-02',category:'Resgate de Patrimônio'}
+  ];
+  assert.equal(contributionBalance(tx),0);
 });
 
 test('next recurring due crosses into the next month after current due passed', () => {

@@ -1,4 +1,5 @@
 export const CONTRIBUTION_CATEGORY = 'Investimentos/Aportes';
+export const WITHDRAWAL_CATEGORY = 'Resgate de Patrimônio';
 
 export const norm = (value = '') => String(value)
   .normalize('NFD')
@@ -35,6 +36,12 @@ export function isContribution(item) {
   return category.includes('aporte') || category.includes('investimento');
 }
 
+export function isWithdrawal(item) {
+  if (!item || item.type !== 'income') return false;
+  const category = norm(item.category);
+  return category.includes('resgate de patrimonio') || category.includes('resgate patrimonio');
+}
+
 export function isVariableConsumption(item) {
   if (!item || item.type !== 'expense' || isContribution(item)) return false;
   return !['recurring', 'scheduled'].includes(item.sourceType);
@@ -45,16 +52,28 @@ export function monthRows(transactions, date) {
   return transactions.filter(item => String(item?.date || '').startsWith(key));
 }
 
+export function contributionBalance(transactions, throughDate = null) {
+  const rows = throughDate
+    ? transactions.filter(item => String(item?.date || '') <= throughDate)
+    : transactions;
+  const contributions = rows.filter(isContribution).reduce((sum, item) => sum + safeNumber(item.amount), 0);
+  const withdrawals = rows.filter(isWithdrawal).reduce((sum, item) => sum + safeNumber(item.amount), 0);
+  return Math.max(0, contributions - withdrawals);
+}
+
 export function monthMetrics(transactions, date) {
   const rows = monthRows(transactions, date);
-  const income = rows.filter(item => item.type === 'income').reduce((sum, item) => sum + safeNumber(item.amount), 0);
-  const contribution = rows.filter(isContribution).reduce((sum, item) => sum + safeNumber(item.amount), 0);
+  const income = rows.filter(item => item.type === 'income' && !isWithdrawal(item)).reduce((sum, item) => sum + safeNumber(item.amount), 0);
+  const withdrawal = rows.filter(isWithdrawal).reduce((sum, item) => sum + safeNumber(item.amount), 0);
+  const grossContribution = rows.filter(isContribution).reduce((sum, item) => sum + safeNumber(item.amount), 0);
+  const contribution = grossContribution - withdrawal;
   const consumption = rows.filter(item => item.type === 'expense' && !isContribution(item)).reduce((sum, item) => sum + safeNumber(item.amount), 0);
   const variableConsumption = rows.filter(isVariableConsumption).reduce((sum, item) => sum + safeNumber(item.amount), 0);
-  const totalOut = contribution + consumption;
-  const balance = income - totalOut;
+  const cashIn = income + withdrawal;
+  const totalOut = grossContribution + consumption;
+  const balance = cashIn - totalOut;
   const contributionRate = income > 0 ? contribution / income * 100 : null;
-  return { rows, income, contribution, consumption, variableConsumption, totalOut, balance, contributionRate };
+  return { rows, income, withdrawal, cashIn, grossContribution, contribution, netContribution: contribution, consumption, variableConsumption, totalOut, balance, contributionRate };
 }
 
 export function daysElapsedInMonth(date, now = new Date()) {
@@ -127,7 +146,6 @@ export function scoreMetrics({ contribution, contributionGoal, dailyAverage, dai
   ];
   if (reserveProgress != null) measures.push({ score: clamp(reserveProgress, 0, 1), weight: 25 });
   const totalWeight = measures.reduce((sum, item) => sum + item.weight, 0);
-  // Missing dimensions remain missing: a partial score cannot masquerade as 100/100.
   const score = Math.round(measures.reduce((sum, item) => sum + item.score * item.weight, 0));
   return { score, completeness: totalWeight, contributionScore, dailyScore, reserveScore: reserveProgress == null ? null : clamp(reserveProgress, 0, 1) };
 }
