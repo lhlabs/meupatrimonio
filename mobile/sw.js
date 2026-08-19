@@ -1,5 +1,5 @@
-const CACHE = 'mp-mobile-v2';
-const SHELL = ['./','./index.html','./mobile.css','./mobile.js','./manifest.webmanifest','./icon.svg','../firebase-config.js','../finance-logic.js'];
+const CACHE = 'mp-mobile-v3';
+const SHELL = ['./','./index.html','./mobile.css','./mobile.base.css','./mobile.js','./manifest.webmanifest','./icon.svg','./apple-touch-icon.png','../firebase-config.js','../finance-logic.js'];
 self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener('activate', event => event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', event => {
