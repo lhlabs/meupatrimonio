@@ -1,0 +1,15 @@
+{
+  "name": "meu-patrimonio-firebase-to-supabase-migration",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "migrate:data": "node migrate-firestore-data.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.112.3",
+    "firebase-admin": "14.2.0"
+  }
+}
