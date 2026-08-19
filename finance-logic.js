@@ -107,10 +107,15 @@ export function nextRecurringDue(recurring, fromDate = new Date()) {
 }
 
 export function activeRecurringExpenseTotal(recurring, todayYmd) {
+  const referenceDay = /^\d{4}-\d{2}-\d{2}$/.test(String(todayYmd || '')) ? String(todayYmd) : ymd(new Date());
+  const referenceMonth = referenceDay.slice(0, 7);
   return recurring
     .filter(item => item?.active === true && item.type === 'expense' && !isContribution(item) && safeNumber(item.amount) > 0)
-    .filter(item => !item.startDate || item.startDate <= todayYmd)
-    .filter(item => !item.endDate || item.endDate >= todayYmd)
+    // Para a reserva, uma recorrência que começa em qualquer dia do mês corrente já é uma obrigação mensal conhecida.
+    // Recorrências que começam somente em meses futuros continuam fora da base.
+    .filter(item => !item.startDate || String(item.startDate).slice(0, 7) <= referenceMonth)
+    // Uma recorrência já encerrada antes de hoje não deve continuar compondo a reserva.
+    .filter(item => !item.endDate || String(item.endDate) >= referenceDay)
     .reduce((sum, item) => sum + safeNumber(item.amount), 0);
 }
 
