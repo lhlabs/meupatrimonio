@@ -114,6 +114,31 @@ export function activeRecurringExpenseTotal(recurring, todayYmd) {
     .reduce((sum, item) => sum + safeNumber(item.amount), 0);
 }
 
+export function recurringExpenseTotalForMonth(recurring, date) {
+  return recurring
+    .filter(item => item?.active === true && item.type === 'expense' && !isContribution(item) && safeNumber(item.amount) > 0)
+    .filter(item => recurringDue(item, date))
+    .reduce((sum, item) => sum + safeNumber(item.amount), 0);
+}
+
+export function periodSpendingMetrics(transactions, recurring, date, now = new Date()) {
+  const rows = monthRows(transactions, date);
+  const realizedRecurring = rows
+    .filter(item => item.type === 'expense' && item.sourceType === 'recurring' && !isContribution(item))
+    .reduce((sum, item) => sum + safeNumber(item.amount), 0);
+  const definedRecurring = recurringExpenseTotalForMonth(recurring, date);
+  const isPastMonth = monthKey(date) < monthKey(now);
+  const recurringExpenses = isPastMonth ? realizedRecurring : Math.max(realizedRecurring, definedRecurring);
+  const otherExpenses = rows
+    .filter(item => item.type === 'expense' && item.sourceType !== 'recurring' && !isContribution(item))
+    .reduce((sum, item) => sum + safeNumber(item.amount), 0);
+  return {
+    recurringExpenses,
+    otherExpenses,
+    totalExpenses: recurringExpenses + otherExpenses
+  };
+}
+
 export function rollingConsumptionAverage(transactions, referenceDate = new Date(), maxMonths = 6) {
   const values = [];
   for (let offset = 1; offset <= maxMonths; offset += 1) {
@@ -139,21 +164,18 @@ export function completedConsumptionHistory(transactions, todayYmd = ymd(new Dat
 }
 
 export function reserveMetrics({ reserve, transactions, recurring, referenceDate = new Date(), todayYmd = ymd(new Date()), targetMonths = 6 }) {
-  // A reserva é uma posição patrimonial atual. Navegar entre meses do dashboard não deve alterar sua meta.
-  // O histórico usa somente meses concluídos até "hoje", evitando que um mês parcial/futuro distorça a base.
+  // Reserva de emergência: objetivo exclusivo de cobrir as despesas recorrentes ativas.
+  // O histórico permanece apenas como informação observada e nunca altera a meta da reserva.
   void referenceDate;
   const recurringBase = activeRecurringExpenseTotal(recurring, todayYmd);
   const history = completedConsumptionHistory(transactions, todayYmd, 6);
-  // Com pouco histórico e contas recorrentes conhecidas, priorizamos a base recorrente para evitar saltos artificiais.
-  // Sem recorrências, o histórico disponível ainda pode servir como aproximação inicial.
-  const historicalBase = history.months >= 3 || recurringBase === 0 ? history.average : 0;
-  const monthlyBase = Math.max(recurringBase, historicalBase);
+  const monthlyBase = recurringBase;
   const months = monthlyBase > 0 ? safeNumber(reserve) / monthlyBase : null;
   const target = monthlyBase > 0 ? monthlyBase * Math.max(1, safeNumber(targetMonths) || 6) : null;
   const progress = target ? clamp(safeNumber(reserve) / target, 0, 1) : null;
   return {
     recurringBase,
-    historicalBase,
+    historicalBase: 0,
     observedHistoricalBase: history.average,
     historyMonths: history.months,
     monthlyBase,
