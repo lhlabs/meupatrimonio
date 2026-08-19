@@ -47,6 +47,7 @@ jobs:
           node --check sw.js
           node --check mobile/mobile.js
           node --check mobile/sw.js
+          node --check tools/firebase-to-supabase/migrate-firestore-data.mjs
       - name: Run financial and security tests
         run: node --test tests/*.test.mjs
 
