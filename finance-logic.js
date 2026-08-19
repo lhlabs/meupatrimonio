@@ -1,5 +1,6 @@
 export const CONTRIBUTION_CATEGORY = 'Investimentos/Aportes';
 export const WITHDRAWAL_CATEGORY = 'Resgate de Patrimônio';
+export const MONTHLY_SPENDING_RATIO = 0.60;
 
 export const norm = (value = '') => String(value)
   .normalize('NFD')
@@ -65,7 +66,7 @@ export function positionMetrics(positions = [], transactions = [], throughDate =
   const manualAssets = positions
     .filter(item => ['asset', 'reserve'].includes(item?.type))
     .reduce((sum, item) => sum + safeNumber(item.value), 0);
-  const reserve = positions
+  const manualReserve = positions
     .filter(item => item?.type === 'reserve')
     .reduce((sum, item) => sum + safeNumber(item.value), 0);
   const debts = positions
@@ -73,8 +74,10 @@ export function positionMetrics(positions = [], transactions = [], throughDate =
     .reduce((sum, item) => sum + safeNumber(item.value), 0);
   const contributionAssets = contributionBalance(transactions, throughDate);
   const assets = manualAssets + contributionAssets;
+  const reserve = manualReserve + contributionAssets;
   return {
     manualAssets,
+    manualReserve,
     contributionAssets,
     assets,
     reserve,
@@ -96,6 +99,10 @@ export function monthMetrics(transactions, date) {
   const balance = cashIn - totalOut;
   const contributionRate = income > 0 ? contribution / income * 100 : null;
   return { rows, income, withdrawal, cashIn, grossContribution, contribution, netContribution: contribution, consumption, variableConsumption, totalOut, balance, contributionRate };
+}
+
+export function monthlySpendingGoal(income, ratio = MONTHLY_SPENDING_RATIO) {
+  return Math.max(0, safeNumber(income)) * clamp(safeNumber(ratio), 0, 1);
 }
 
 export function daysElapsedInMonth(date, now = new Date()) {
@@ -213,20 +220,36 @@ export function reserveMetrics({ reserve, transactions, recurring, referenceDate
   };
 }
 
-export function scoreMetrics({ contribution, contributionGoal, dailyAverage, dailyGoal, reserveProgress }) {
-  if (!(safeNumber(contributionGoal) > 0) || !(safeNumber(dailyGoal) > 0)) {
-    return { score: null, completeness: 0, contributionScore: null, dailyScore: null, reserveScore: reserveProgress == null ? null : clamp(reserveProgress, 0, 1) };
+export function scoreMetrics({ contribution, contributionGoal, spending, spendingGoal, reserveProgress }) {
+  const hasContributionGoal = safeNumber(contributionGoal) > 0;
+  const hasSpendingGoal = safeNumber(spendingGoal) > 0;
+  if (!hasContributionGoal || !hasSpendingGoal) {
+    return {
+      score: null,
+      completeness: 0,
+      contributionScore: hasContributionGoal ? clamp(safeNumber(contribution) / safeNumber(contributionGoal), 0, 1) : null,
+      spendingScore: null,
+      reserveScore: reserveProgress == null ? null : clamp(reserveProgress, 0, 1)
+    };
   }
   const contributionScore = clamp(safeNumber(contribution) / safeNumber(contributionGoal), 0, 1);
-  const dailyScore = dailyAverage <= safeNumber(dailyGoal) ? 1 : clamp(safeNumber(dailyGoal) / Math.max(dailyAverage, 0.01), 0, 1);
+  const spendingScore = safeNumber(spending) <= safeNumber(spendingGoal)
+    ? 1
+    : clamp(safeNumber(spendingGoal) / Math.max(safeNumber(spending), 0.01), 0, 1);
   const measures = [
     { score: contributionScore, weight: 40 },
-    { score: dailyScore, weight: 35 }
+    { score: spendingScore, weight: 35 }
   ];
   if (reserveProgress != null) measures.push({ score: clamp(reserveProgress, 0, 1), weight: 25 });
   const totalWeight = measures.reduce((sum, item) => sum + item.weight, 0);
   const score = Math.round(measures.reduce((sum, item) => sum + item.score * item.weight, 0));
-  return { score, completeness: totalWeight, contributionScore, dailyScore, reserveScore: reserveProgress == null ? null : clamp(reserveProgress, 0, 1) };
+  return {
+    score,
+    completeness: totalWeight,
+    contributionScore,
+    spendingScore,
+    reserveScore: reserveProgress == null ? null : clamp(reserveProgress, 0, 1)
+  };
 }
 
 export function projectFutureValue({ annualRealRate, years, startingValue, monthlyContribution }) {
