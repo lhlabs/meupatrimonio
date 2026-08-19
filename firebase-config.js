@@ -15,8 +15,11 @@ export const appCheckSiteKey = "6Lfm8lwtAAAAAAbXI--eqSShT9hfmmj6ezeBQpnJ";
 // Disponibiliza somente configuração pública para módulos independentes.
 if (typeof window !== 'undefined') {
   globalThis.__MP_FIREBASE_CONFIG__ = firebaseConfig;
+
+  // Cadastro e privacidade não alteram a persistência do Firebase Auth e podem
+  // ser carregados imediatamente. A camada de sessão é carregada somente após
+  // o evento load, quando app.js/mobile.js já concluíram sua inicialização.
   Promise.allSettled([
-    import('./security-hardening.js'),
     import('./registration.js'),
     import('./privacy-controls.js')
   ]).then(results => {
@@ -24,4 +27,13 @@ if (typeof window !== 'undefined') {
       if (result.status === 'rejected') console.error('Módulo complementar indisponível.', result.reason);
     });
   });
+
+  const loadSessionHardening = () => {
+    import('./security-hardening.js').catch(error => {
+      console.error('Camada de segurança de sessão indisponível.', error);
+    });
+  };
+
+  if (document.readyState === 'complete') loadSessionHardening();
+  else window.addEventListener('load', loadSessionHardening, { once: true });
 }
