@@ -129,9 +129,10 @@ test('recurring commitments starting later in the current month already count to
   assert.equal(r.months,3);
 });
 
-test('period spending includes active recurring commitments and excludes contributions', () => {
+test('period spending uses materialized recurring transactions and excludes contributions', () => {
   const tx=[
     {type:'expense',amount:1200,date:'2026-08-05',category:'Moradia',sourceType:'recurring'},
+    {type:'expense',amount:800,date:'2026-08-25',category:'Veículo',sourceType:'recurring'},
     {type:'expense',amount:300,date:'2026-08-10',category:'Mercado'},
     {type:'expense',amount:200,date:'2026-08-12',category:'Academia',sourceType:'scheduled'},
     {type:'expense',amount:1000,date:'2026-08-15',category:'Investimentos/Aportes'}
