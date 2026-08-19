@@ -5,6 +5,13 @@ coverage/
 *.log
 .DS_Store
 
+# Android / Gradle
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/keystore.properties
+
 # Variáveis de ambiente e segredos locais
 .env
 .env.*
