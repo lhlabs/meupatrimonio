@@ -1,0 +1,25 @@
+# Dependências e artefatos locais
+node_modules/
+coverage/
+.firebase/
+*.log
+.DS_Store
+
+# Variáveis de ambiente e segredos locais
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Credenciais administrativas / service accounts
+service-account*.json
+service_account*.json
+*-firebase-adminsdk-*.json
+firebase-adminsdk*.json
+credentials*.json
+secrets*.json
