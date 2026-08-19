@@ -105,6 +105,21 @@ export function monthlySpendingGoal(income, ratio = MONTHLY_SPENDING_RATIO) {
   return Math.max(0, safeNumber(income)) * clamp(safeNumber(ratio), 0, 1);
 }
 
+export function realizedSpendingMetrics(transactions, date) {
+  const rows = monthRows(transactions, date);
+  const recurringExpenses = rows
+    .filter(item => item?.type === 'expense' && item.sourceType === 'recurring' && !isContribution(item))
+    .reduce((sum, item) => sum + safeNumber(item.amount), 0);
+  const otherExpenses = rows
+    .filter(item => item?.type === 'expense' && item.sourceType !== 'recurring' && !isContribution(item))
+    .reduce((sum, item) => sum + safeNumber(item.amount), 0);
+  return {
+    recurringExpenses,
+    otherExpenses,
+    totalExpenses: recurringExpenses + otherExpenses
+  };
+}
+
 export function daysElapsedInMonth(date, now = new Date()) {
   const isCurrent = date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
   return isCurrent ? Math.max(1, now.getDate()) : new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
@@ -233,16 +248,20 @@ export function scoreMetrics({ contribution, contributionGoal, spending, spendin
     };
   }
   const contributionScore = clamp(safeNumber(contribution) / safeNumber(contributionGoal), 0, 1);
-  const spendingScore = safeNumber(spending) <= safeNumber(spendingGoal)
+  const spendingValue = safeNumber(spending);
+  const spendingLimit = safeNumber(spendingGoal);
+  const spendingScore = spendingValue <= spendingLimit
     ? 1
-    : clamp(safeNumber(spendingGoal) / Math.max(safeNumber(spending), 0.01), 0, 1);
+    : clamp(1 - ((spendingValue - spendingLimit) / spendingLimit), 0, 1);
   const measures = [
     { score: contributionScore, weight: 40 },
     { score: spendingScore, weight: 35 }
   ];
   if (reserveProgress != null) measures.push({ score: clamp(reserveProgress, 0, 1), weight: 25 });
   const totalWeight = measures.reduce((sum, item) => sum + item.weight, 0);
-  const score = Math.round(measures.reduce((sum, item) => sum + item.score * item.weight, 0));
+  let score = Math.round(measures.reduce((sum, item) => sum + item.score * item.weight, 0));
+  if (spendingValue > spendingLimit * 1.5) score = Math.min(score, 49);
+  else if (spendingValue > spendingLimit) score = Math.min(score, 69);
   return {
     score,
     completeness: totalWeight,
