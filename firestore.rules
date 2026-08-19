@@ -4,15 +4,28 @@ service cloud.firestore {
     function signedIn() { return request.auth != null; }
     function owns(userId) { return signedIn() && request.auth.uid == userId; }
     function emailVerified() { return signedIn() && request.auth.token.email_verified == true; }
-    function legacyRootExists(userId) {
-      return owns(userId) && exists(/databases/$(database)/documents/users/$(userId));
+
+    // Compatibilidade temporária com contas criadas antes da exigência de
+    // verificação de e-mail. O UID continua obrigatório e o e-mail do perfil
+    // precisa coincidir com o token autenticado. Remover esta exceção depois
+    // que todas as contas legadas tiverem o e-mail confirmado.
+    function legacyRootMatches(userId) {
+      return owns(userId)
+        && request.auth.token.email is string
+        && exists(/databases/$(database)/documents/users/$(userId))
+        && get(/databases/$(database)/documents/users/$(userId)).data.email == request.auth.token.email;
     }
+
     function canUsePrivateData(userId) {
-      return owns(userId) && (emailVerified() || legacyRootExists(userId));
+      return owns(userId) && (emailVerified() || legacyRootMatches(userId));
     }
+
     function validDate(v) { return v is string && v.matches('^\\d{4}-\\d{2}-\\d{2}$'); }
     function validMonth(v) { return v is string && v.matches('^\\d{4}-\\d{2}$'); }
     function validMoney(v) { return v is number && v >= 0 && v < 1000000000; }
+    function createdNow() { return request.resource.data.createdAt == request.time; }
+    function createdAtUnchanged() { return request.resource.data.createdAt == resource.data.createdAt; }
+    function updatedNow() { return request.resource.data.updatedAt == request.time; }
 
     function validTransaction() {
       return request.resource.data.keys().hasOnly(['type','amount','category','description','date','recurring','sourceType','sourceId','createdAt'])
@@ -89,46 +102,57 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      // O perfil-raiz é visível somente ao próprio usuário. Novos perfis só podem
-      // ser criados depois da verificação do e-mail. Contas legadas já existentes
-      // continuam acessíveis para não bloquear o usuário atual.
+      // Perfil-raiz visível somente ao próprio usuário. Novos perfis exigem
+      // e-mail verificado. Alterações arbitrárias no perfil permanecem negadas.
       allow read: if owns(userId);
       allow create: if owns(userId)
         && emailVerified()
         && request.resource.data.keys().hasOnly(['createdAt','email'])
         && request.resource.data.email == request.auth.token.email
-        && request.resource.data.createdAt is timestamp;
-      allow update, delete: if false;
+        && request.resource.data.createdAt is timestamp
+        && createdNow();
+      allow update: if false;
+      allow delete: if canUsePrivateData(userId);
 
       match /transactions/{txId} {
         allow read, delete: if canUsePrivateData(userId);
-        allow create, update: if canUsePrivateData(userId) && validTransaction();
+        allow create: if canUsePrivateData(userId) && validTransaction() && createdNow();
+        allow update: if canUsePrivateData(userId) && validTransaction() && createdAtUnchanged();
       }
+
       match /positions/{positionId} {
         allow read, delete: if canUsePrivateData(userId);
-        allow create, update: if canUsePrivateData(userId) && validPosition();
+        allow create: if canUsePrivateData(userId) && validPosition() && createdNow();
+        allow update: if canUsePrivateData(userId) && validPosition() && createdAtUnchanged();
       }
+
       match /config/planning {
         allow read: if canUsePrivateData(userId);
-        allow create, update: if canUsePrivateData(userId) && validPlanning();
-        allow delete: if false;
+        allow create, update: if canUsePrivateData(userId) && validPlanning() && updatedNow();
+        allow delete: if canUsePrivateData(userId);
       }
+
       match /monthlyGoals/{monthId} {
         allow read: if canUsePrivateData(userId);
-        allow create, update: if canUsePrivateData(userId) && validMonthlyGoal(monthId);
-        allow delete: if false;
+        allow create: if canUsePrivateData(userId) && validMonthlyGoal(monthId) && createdNow() && updatedNow();
+        allow update: if canUsePrivateData(userId) && validMonthlyGoal(monthId) && createdAtUnchanged() && updatedNow();
+        allow delete: if canUsePrivateData(userId);
       }
+
       match /recurring/{recurringId} {
         allow read, delete: if canUsePrivateData(userId);
-        allow create, update: if canUsePrivateData(userId) && validRecurring();
+        allow create: if canUsePrivateData(userId) && validRecurring() && createdNow() && updatedNow();
+        allow update: if canUsePrivateData(userId) && validRecurring() && createdAtUnchanged() && updatedNow();
       }
+
       match /scheduled/{scheduledId} {
         allow read, delete: if canUsePrivateData(userId);
-        allow create, update: if canUsePrivateData(userId) && validScheduled();
+        allow create: if canUsePrivateData(userId) && validScheduled() && createdNow() && updatedNow();
+        allow update: if canUsePrivateData(userId) && validScheduled() && createdAtUnchanged() && updatedNow();
       }
     }
 
-    // Qualquer caminho não explicitamente autorizado acima permanece fechado.
+    // Deny by default: qualquer caminho não listado acima permanece fechado.
     match /{document=**} { allow read, write: if false; }
   }
 }

@@ -17,9 +17,12 @@ concurrency:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
@@ -29,11 +32,15 @@ jobs:
         run: |
           node --check app.js
           node --check registration.js
+          node --check security-hardening.js
+          node --check privacy-controls.js
           node --check dashboard-metrics.js
           node --check finance-logic.js
           node --check firebase-config.js
           node --check portfolio.js
           node --check sw.js
+          node --check mobile/mobile.js
+          node --check mobile/sw.js
       - name: Run financial logic tests
         run: node --test tests/*.test.mjs
 
@@ -48,9 +55,12 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - name: Configure Pages
         uses: actions/configure-pages@v6
       - name: Upload artifact
