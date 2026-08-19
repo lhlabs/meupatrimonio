@@ -84,8 +84,33 @@ function installRegistrationPasswordGuard() {
   observer.observe(document.documentElement, { childList: true, subtree: true });
 }
 
+function installAuthEnumerationGuard() {
+  const attach = () => {
+    const status = document.querySelector('#registerStatus');
+    if (!status || status.dataset.securityEnumerationGuard === '1') return false;
+
+    const sanitize = () => {
+      if (/já existe uma conta com este e-mail/i.test(status.textContent || '')) {
+        status.textContent = 'Não foi possível criar a conta com estes dados. Se você já possui cadastro, tente entrar ou redefinir a senha.';
+      }
+    };
+
+    status.dataset.securityEnumerationGuard = '1';
+    new MutationObserver(sanitize).observe(status, { childList: true, characterData: true, subtree: true });
+    sanitize();
+    return true;
+  };
+
+  if (attach()) return;
+  const observer = new MutationObserver(() => {
+    if (attach()) observer.disconnect();
+  });
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+}
+
 try {
   installRegistrationPasswordGuard();
+  installAuthEnumerationGuard();
 
   const app = await resolveApp();
   const auth = getAuth(app);
