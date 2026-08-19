@@ -129,7 +129,7 @@ test('recurring commitments starting later in the current month already count to
   assert.equal(r.months,3);
 });
 
-test('period spending is recurring commitments plus other period expenses', () => {
+test('period spending contains only realized expenses and excludes contributions', () => {
   const tx=[
     {type:'expense',amount:1200,date:'2026-08-05',category:'Moradia',sourceType:'recurring'},
     {type:'expense',amount:300,date:'2026-08-10',category:'Mercado'},
@@ -141,12 +141,12 @@ test('period spending is recurring commitments plus other period expenses', () =
     {active:true,type:'expense',amount:800,dayOfMonth:25,category:'Veículo',startDate:'2026-01-01',endDate:''}
   ];
   const result=periodSpendingMetrics(tx,recurring,new Date(2026,7,1),new Date(2026,7,19));
-  assert.equal(result.recurringExpenses,2000);
+  assert.equal(result.recurringExpenses,1200);
   assert.equal(result.otherExpenses,500);
-  assert.equal(result.totalExpenses,2500);
+  assert.equal(result.totalExpenses,1700);
 });
 
-test('past period spending prefers realized recurring expenses', () => {
+test('past period spending uses realized recurring expenses', () => {
   const tx=[
     {type:'expense',amount:900,date:'2026-07-05',category:'Moradia',sourceType:'recurring'},
     {type:'expense',amount:100,date:'2026-07-08',category:'Mercado'}
@@ -226,10 +226,10 @@ test('score uses contribution goal and automatic monthly spending goal', () => {
   assert.equal(s.spendingScore,1);
 });
 
-test('score penalizes monthly spending above 60% target', () => {
+test('score never stays healthy when monthly spending is above the 60% target', () => {
   const s=scoreMetrics({contribution:1000,contributionGoal:1000,spending:7500,spendingGoal:6000,reserveProgress:1});
-  assert.equal(s.spendingScore,0.8);
-  assert.equal(s.score,93);
+  assert.equal(s.spendingScore,0.75);
+  assert.equal(s.score,69);
 });
 
 test('projection handles zero real rate', () => {
