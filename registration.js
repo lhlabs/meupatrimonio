@@ -16,29 +16,30 @@ async function resolveApp() {
     await sleep(50);
   }
   const config = globalThis.__MP_FIREBASE_CONFIG__;
-  if (!config) throw new Error('Configuração do Firebase indisponível.');
+  if (!config) throw new Error('Configuração de autenticação indisponível.');
   return initializeApp(config);
 }
 
 function authMessage(error) {
   const code = String(error?.code || '');
-  if (code.includes('email-already-in-use')) return 'Já existe uma conta com este e-mail. Entre normalmente ou reenvie a confirmação.';
+  if (code.includes('email-already-in-use')) return 'Não foi possível criar a conta com estes dados. Se você já possui cadastro, tente entrar ou redefinir a senha.';
   if (code.includes('invalid-email')) return 'Informe um e-mail válido.';
   if (code.includes('weak-password')) return 'Use uma senha mais forte, com pelo menos 8 caracteres.';
   if (code.includes('too-many-requests')) return 'Muitas tentativas. Aguarde alguns minutos e tente novamente.';
-  if (code.includes('operation-not-allowed')) return 'O cadastro por e-mail e senha ainda não está habilitado no Firebase.';
+  if (code.includes('operation-not-allowed')) return 'O cadastro por e-mail e senha ainda não está habilitado no Supabase.';
+  if (code.includes('email-not-verified')) return 'Confirme seu e-mail antes de entrar. Verifique também Spam, Lixo eletrônico e Promoções.';
   if (code.includes('invalid-credential') || code.includes('wrong-password') || code.includes('user-not-found')) return 'E-mail ou senha inválidos.';
   if (code.includes('network-request-failed')) return 'Falha de conexão. Verifique sua internet e tente novamente.';
-  if (code.includes('unauthorized-domain')) return 'Este endereço do aplicativo não está autorizado no Firebase Authentication.';
+  if (code.includes('unauthorized-domain')) return 'Este endereço do aplicativo não está autorizado na autenticação.';
   return `Não foi possível concluir a autenticação${code ? ` (${code})` : ''}.`;
 }
 
 function verificationMessage(error) {
   const code = String(error?.code || '');
-  if (code.includes('too-many-requests')) return 'O Firebase bloqueou novos envios temporariamente por excesso de tentativas. Aguarde alguns minutos e tente novamente.';
+  if (code.includes('too-many-requests')) return 'O serviço bloqueou novos envios temporariamente por excesso de tentativas. Aguarde alguns minutos e tente novamente.';
   if (code.includes('network-request-failed')) return 'Não foi possível solicitar o e-mail de confirmação por falha de conexão.';
-  if (code.includes('unauthorized-continue-uri') || code.includes('unauthorized-domain')) return 'O domínio do aplicativo precisa ser autorizado no Firebase Authentication antes do envio.';
-  return `A conta existe, mas o Firebase não confirmou o envio do e-mail${code ? ` (${code})` : ''}.`;
+  if (code.includes('unauthorized-continue-uri') || code.includes('unauthorized-domain')) return 'O endereço do aplicativo precisa ser autorizado antes do envio.';
+  return `A conta existe, mas não foi possível confirmar o envio do e-mail${code ? ` (${code})` : ''}.`;
 }
 
 function setVisible(element, visible) {
@@ -68,7 +69,7 @@ function injectRegistrationUi() {
     <div style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,.08)">
       <div class="eyebrow">NOVA CONTA</div>
       <h2 style="margin:4px 0 6px;font-size:1.2rem">Crie seu acesso</h2>
-      <p class="muted" style="margin:0 0 12px">Cada conta possui um identificador exclusivo. Seus dados financeiros ficam separados dos demais usuários no Firestore.</p>
+      <p class="muted" style="margin:0 0 12px">Cada conta possui um identificador exclusivo. Seus dados financeiros ficam separados dos demais usuários por autenticação e regras RLS.</p>
       <form id="registerForm" autocomplete="on">
         <label>E-mail<input id="registerEmail" type="email" autocomplete="email" maxlength="254" required /></label>
         <label>Senha<input id="registerPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required /></label>
@@ -162,7 +163,7 @@ try {
 
             try {
               await sendVerification(auth, credential.user);
-              ui.setStatus('E-mail de confirmação solicitado ao Firebase com sucesso. Verifique também Spam, Lixo eletrônico e Promoções.');
+              ui.setStatus('E-mail de confirmação solicitado com sucesso. Verifique também Spam, Lixo eletrônico e Promoções.');
             } catch (verificationError) {
               console.error('Falha ao enviar verificação.', verificationError);
               ui.setStatus(verificationMessage(verificationError), true);
@@ -204,7 +205,7 @@ try {
         const credential = await createUserWithEmailAndPassword(auth, email, password);
         createdUser = credential.user;
         await sendVerification(auth, credential.user);
-        ui.setStatus('Conta criada e e-mail de confirmação solicitado ao Firebase. Abra o link recebido e depois entre normalmente. Verifique também Spam, Lixo eletrônico e Promoções.');
+        ui.setStatus('Conta criada e e-mail de confirmação solicitado. Abra o link recebido e depois entre normalmente. Verifique também Spam, Lixo eletrônico e Promoções.');
         ui.showResend(true);
       } catch (error) {
         console.error('Falha ao criar conta ou enviar verificação.', error);
@@ -237,7 +238,7 @@ try {
           ui.showResend(false);
         } else {
           await sendVerification(auth, credential.user);
-          ui.setStatus('Novo e-mail de confirmação solicitado ao Firebase com sucesso. Verifique a caixa de entrada, Spam, Lixo eletrônico e Promoções.');
+          ui.setStatus('Novo e-mail de confirmação solicitado com sucesso. Verifique a caixa de entrada, Spam, Lixo eletrônico e Promoções.');
         }
       } catch (error) {
         console.error('Falha ao reenviar verificação.', error);
