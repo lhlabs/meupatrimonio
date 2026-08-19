@@ -28,6 +28,7 @@ jobs:
         run: |
           node --check app.js
           node --check finance-logic.js
+          node --check portfolio.js
           node --check sw.js
       - name: Run financial logic tests
         run: node --test tests/finance-logic.test.mjs
