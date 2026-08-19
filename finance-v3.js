@@ -48,6 +48,7 @@ function relabelGoalUI(){
     const p=form.querySelector('p');
     if(p)p.textContent='Defina quanto pretende aportar e o limite total de gastos de consumo em cada mês.';
   }
+
   const goalCard=document.querySelector('.goal-card');
   if(goalCard){
     const title=goalCard.querySelector('h2');if(title)title.textContent='Metas financeiras do mês';
@@ -55,10 +56,33 @@ function relabelGoalUI(){
     if(spans[0])spans[0].textContent='Meta de aporte';
     if(spans[1])spans[1].textContent='Limite de gastos';
   }
+
   const saving=document.querySelector('#savingRate')?.closest('.mini-metric')?.querySelector('span');
   if(saving)saving.textContent='Taxa de aporte';
   const debt=document.querySelector('#debtValue')?.closest('.mini-metric')?.querySelector('span');
   if(debt)debt.textContent='Dívidas cadastradas';
+
+  const reserveCard=document.querySelector('.freedom-card');
+  if(reserveCard){
+    const kicker=reserveCard.querySelector('.card-kicker');if(kicker)kicker.textContent='RESERVA DE EMERGÊNCIA';
+    const title=reserveCard.querySelector('h2');if(title)title.textContent='Cobertura da reserva';
+  }
+  const reserveSmall=document.querySelector('#freedomPercent')?.parentElement?.querySelector('small');
+  if(reserveSmall)reserveSmall.textContent='da meta de 6 meses';
+  const targetLabel=document.querySelector('#freedomTarget')?.parentElement?.querySelector('span');
+  if(targetLabel)targetLabel.textContent='Meta 6× recorrentes';
+  const gapLabel=document.querySelector('#freedomGap')?.parentElement?.querySelector('span');
+  if(gapLabel)gapLabel.textContent='Falta';
+
+  const ff=document.querySelector('#financialFreedomMonthlyCost')?.closest('label');
+  if(ff)ff.style.display='none';
+  const reserveTarget=document.querySelector('#reserveTargetMonths');
+  if(reserveTarget){
+    reserveTarget.value='6';
+    reserveTarget.disabled=true;
+    const label=reserveTarget.closest('label');
+    if(label&&label.firstChild?.nodeType===3)label.firstChild.textContent='Reserva-alvo — 6 meses';
+  }
 }
 
 async function refresh(db,user){
@@ -106,14 +130,22 @@ async function refresh(db,user){
     setText('#reserveValue','Nenhuma despesa recorrente ativa identificada');
     setText('#freedomPercent','—');
     document.querySelector('#freedomRing')?.style.setProperty('--p','0%');
-    setText('#freedomTarget','—');setText('#freedomGap','—');
+    setText('#freedomTarget','—');
+    setText('#freedomGap','—');
     setText('#freedomBadge','Cadastre contas recorrentes');
   }
 
   const debts=pos.filter(p=>p.type==='debt').reduce((s,p)=>s+Number(p.value||0),0);
-  if(pos.length===0){setText('#debtValue','—');setText('#debtRatio','Nenhuma posição patrimonial cadastrada');}
-  else if(debts===0){setText('#debtValue',currency.format(0));setText('#debtRatio','Nenhuma dívida cadastrada');}
-  else{setText('#debtValue',currency.format(debts));setText('#debtRatio','Saldo devedor cadastrado');}
+  if(pos.length===0){
+    setText('#debtValue','—');
+    setText('#debtRatio','Nenhuma posição patrimonial cadastrada');
+  }else if(debts===0){
+    setText('#debtValue',currency.format(0));
+    setText('#debtRatio','Nenhuma dívida cadastrada');
+  }else{
+    setText('#debtValue',currency.format(debts));
+    setText('#debtRatio','Saldo devedor cadastrado');
+  }
 
   setText('#surplusGoalStatus',currency.format(contributions));
   setText('#surplusGoalDetail',contributionGoal>0?`Meta ${currency.format(contributionGoal)} · ${contributions>=contributionGoal?'atingida':'faltam '+currency.format(Math.max(0,contributionGoal-contributions))}`:'Defina a meta de aporte em Metas');
@@ -121,16 +153,33 @@ async function refresh(db,user){
   setText('#dailyGoalDetail',spendGoal>0?`Limite ${currency.format(spendGoal)} · ${consumption<=spendGoal?'dentro do limite':'excesso de '+currency.format(consumption-spendGoal)}`:'Defina o limite mensal em Metas');
 
   const measures=[],vitals=[];
-  if(contributionGoal>0){const score=clamp(contributions/contributionGoal,0,1);measures.push({score,weight:40});vitals.push(['Aportes',`${Math.round(score*100)}%`]);}else vitals.push(['Aportes','—']);
-  if(spendGoal>0){const score=consumption<=spendGoal?1:clamp(spendGoal/Math.max(consumption,.01),0,1);measures.push({score,weight:35});vitals.push(['Gastos',consumption<=spendGoal?'Dentro':'Acima']);}else vitals.push(['Gastos','—']);
-  if(reserveProgress!==null){measures.push({score:reserveProgress,weight:25});vitals.push(['Reserva',`${reserveMonths.toFixed(1)}/6`]);}else vitals.push(['Reserva','—']);
+  if(contributionGoal>0){
+    const score=clamp(contributions/contributionGoal,0,1);
+    measures.push({score,weight:40});
+    vitals.push(['Aportes',`${Math.round(score*100)}%`]);
+  }else vitals.push(['Aportes','—']);
+
+  if(spendGoal>0){
+    const score=consumption<=spendGoal?1:clamp(spendGoal/Math.max(consumption,.01),0,1);
+    measures.push({score,weight:35});
+    vitals.push(['Gastos',consumption<=spendGoal?'Dentro':'Acima']);
+  }else vitals.push(['Gastos','—']);
+
+  if(reserveProgress!==null){
+    measures.push({score:reserveProgress,weight:25});
+    vitals.push(['Reserva',`${reserveMonths.toFixed(1)}/6`]);
+  }else vitals.push(['Reserva','—']);
 
   const totalWeight=measures.reduce((s,x)=>s+x.weight,0);
   const health=totalWeight?Math.round(measures.reduce((s,x)=>s+x.score*x.weight,0)/totalWeight):null;
+
   const vit=document.querySelector('#petVitals');
   if(vit)vit.innerHTML=vitals.map(([a,b])=>`<div><span>${a}</span><strong>${b}</strong></div>`).join('');
   const hb=document.querySelector('#petHealthBadge');
-  if(hb){hb.textContent=health===null?'Saúde —':`Saúde ${health}%`;hb.className=`health-badge ${health===null?'warn':health>=70?'good':health>=45?'warn':'bad'}`;}
+  if(hb){
+    hb.textContent=health===null?'Saúde —':`Saúde ${health}%`;
+    hb.className=`health-badge ${health===null?'warn':health>=70?'good':health>=45?'warn':'bad'}`;
+  }
   const bar=document.querySelector('#petHealthBar');if(bar)bar.style.width=`${health??0}%`;
 
   let avatar='🐷',state='Aguardando metas',msg='Defina meta de aporte, limite de gastos e mantenha a reserva adequada.';
@@ -140,7 +189,10 @@ async function refresh(db,user){
     else if(health>=50){avatar='🐽';state='Em atenção';msg='Uma das metas do mês está pressionando sua saúde financeira.';}
     else{avatar='😵‍💫';state='Crítico';msg='Aportes, gastos ou reserva exigem correção.';}
   }
-  setText('#petAvatar',avatar);setText('#petName',`Cofrinho · ${state}`);setText('#petMessage',msg);
+
+  setText('#petAvatar',avatar);
+  setText('#petName',`Cofrinho · ${state}`);
+  setText('#petMessage',msg);
   setText('#financeScore',health===null?'—':String(health));
   document.querySelector('#scoreRing')?.style.setProperty('--p',`${health??0}%`);
   setText('#scoreLabel',health===null?'Aguardando metas':health>=85?'Excelente':health>=70?'Forte':health>=50?'Em evolução':'Atenção');
@@ -155,17 +207,34 @@ async function refresh(db,user){
     ];
     missions.innerHTML=items.map(([i,n,d,p])=>`<div class="mission ${p>=1?'done':''}"><div class="mission-icon">${i}</div><div><strong>${n}</strong><p>${d}</p><div class="mission-progress"><i style="width:${p*100}%"></i></div></div></div>`).join('');
   }
+
   relabelGoalUI();
   injectContributionCategory();
 }
 
 window.addEventListener('load',()=>{
   let app,auth,db,user=null;
-  try{app=getApp();auth=getAuth(app);db=getFirestore(app);}catch(e){console.warn('Módulo financeiro aguardando Firebase',e);return;}
+  try{
+    app=getApp();
+    auth=getAuth(app);
+    db=getFirestore(app);
+  }catch(e){
+    console.warn('Módulo financeiro aguardando Firebase',e);
+    return;
+  }
+
   const run=()=>user&&refresh(db,user).catch(e=>console.warn('Falha ao atualizar indicadores',e));
   relabelGoalUI();
   injectContributionCategory();
-  onAuthStateChanged(auth,u=>{user=u;if(u){setTimeout(run,900);setTimeout(run,2200);}});
+
+  onAuthStateChanged(auth,u=>{
+    user=u;
+    if(u){
+      setTimeout(()=>{relabelGoalUI();injectContributionCategory();run();},900);
+      setTimeout(run,2200);
+    }
+  });
+
   document.addEventListener('submit',()=>setTimeout(run,900));
   document.addEventListener('click',e=>{
     if(e.target.closest('#quickAddBtn,#openTransactionBtn,#openRecurringBtn,#openScheduledBtn,[data-delete-tx],[data-delete-position],[data-del-rec],[data-edit-rec],#prevMonth,#nextMonth,[data-go]')){
