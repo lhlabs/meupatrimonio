@@ -13,7 +13,7 @@ import {
   CONTRIBUTION_CATEGORY, WITHDRAWAL_CATEGORY, addYear, clamp, contributionBalance,
   isContribution, isWithdrawal, monthKey, monthMetrics, monthlySpendingGoal,
   nextRecurringDue, periodSpendingMetrics, positionMetrics, projectFutureValue,
-  recurringDue, reserveMetrics, safeNumber, scoreMetrics, ymd
+  recurringDue, reserveMetrics, safeNumber, scoreMetrics, shouldMaterializeRecurring, ymd
 } from "./finance-logic.js";
 
 const $ = selector => document.querySelector(selector);
@@ -394,7 +394,7 @@ async function processAutomations() {
         if (ymd(cursor) > today) break;
         continue;
       }
-      if (due > today) break;
+      if (!shouldMaterializeRecurring(due, today)) break;
       const id = `rec_${recurring.id}_${due.slice(0,7)}`;
       if (!existingIds.has(id)) {
         await setDoc(userDoc('transactions', id), {
