@@ -34,7 +34,7 @@ function normalizeError(error) {
   else if (message.includes('user already registered') || message.includes('already been registered')) code = 'auth/email-already-in-use';
   else if (message.includes('password') && (message.includes('weak') || message.includes('least'))) code = 'auth/weak-password';
   else if (message.includes('rate limit') || message.includes('too many')) code = 'auth/too-many-requests';
-  else if (message.includes('invalid email') || message.includes('email address') && message.includes('invalid')) code = 'auth/invalid-email';
+  else if (message.includes('invalid email') || (message.includes('email address') && message.includes('invalid'))) code = 'auth/invalid-email';
   else if (message.includes('network') || message.includes('fetch')) code = 'auth/network-request-failed';
   const wrapped = new Error(error.message || 'Falha de autenticação.');
   wrapped.code = code;
@@ -59,8 +59,8 @@ export function getAuth() {
 }
 
 export async function setPersistence() {
-  // O cliente Supabase já usa sessionStorage, equivalente à política de sessão
-  // efetiva do aplicativo. Mantido como no-op para preservar o contrato legado.
+  // O cliente Supabase usa sessionStorage, equivalente à política efetiva
+  // do aplicativo. Mantido como no-op para preservar o contrato legado.
 }
 
 export async function signInWithEmailAndPassword(_auth, email, password) {
@@ -86,7 +86,7 @@ export async function sendEmailVerification(targetUser) {
   const email = targetUser?.email || '';
   if (!email) throw normalizeError(new Error('E-mail indisponível.'));
 
-  // signUp já envia a primeira confirmação. Evita duplicar a mensagem segundos depois.
+  // signUp já solicita a primeira confirmação. Evita envio duplicado imediato.
   if (lastSignup.email === email.toLowerCase() && Date.now() - lastSignup.at < 10000) return;
 
   const { error } = await supabase.auth.resend({
@@ -107,31 +107,36 @@ export async function sendPasswordResetEmail(_auth, email) {
 export async function signOut() {
   const { error } = await supabase.auth.signOut({ scope: 'local' });
   rawUser = null;
-  if (error) throw normalizeError(error);
+  if (error && !String(error.message || '').toLowerCase().includes('session')) throw normalizeError(error);
 }
 
 export function onAuthStateChanged(_auth, callback) {
   let active = true;
-  let initialDelivered = false;
+  let delivered = false;
+  let deliveredUid = undefined;
+
+  const deliver = user => {
+    if (!active) return;
+    const mapped = mapUser(user);
+    const uid = mapped?.uid ?? null;
+    if (delivered && uid === deliveredUid) return;
+    delivered = true;
+    deliveredUid = uid;
+    callback(mapped);
+  };
 
   supabase.auth.getSession().then(({ data }) => {
-    if (!active || initialDelivered) return;
     rawUser = data?.session?.user || null;
-    initialDelivered = true;
-    callback(mapUser(rawUser));
+    deliver(rawUser);
   }).catch(() => {
-    if (!active || initialDelivered) return;
-    initialDelivered = true;
     rawUser = null;
-    callback(null);
+    deliver(null);
   });
 
   const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
     rawUser = session?.user || null;
     if (event === 'PASSWORD_RECOVERY') await handlePasswordRecovery();
-    if (!active) return;
-    initialDelivered = true;
-    callback(mapUser(rawUser));
+    deliver(rawUser);
   });
 
   return () => {
