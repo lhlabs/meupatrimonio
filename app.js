@@ -323,7 +323,13 @@ async function loadCollection(name, sortField, direction = 'desc') {
     const av = sortField === 'createdAt' ? timestampValue(a[sortField]) : String(a[sortField] ?? '');
     const bv = sortField === 'createdAt' ? timestampValue(b[sortField]) : String(b[sortField] ?? '');
     const cmp = av < bv ? -1 : av > bv ? 1 : 0;
-    return direction === 'asc' ? cmp : -cmp;
+    if (cmp !== 0) return direction === 'asc' ? cmp : -cmp;
+    if (sortField === 'date') {
+      const createdCmp = timestampValue(a.createdAt) - timestampValue(b.createdAt);
+      if (createdCmp !== 0) return -createdCmp;
+      return String(b.id || '').localeCompare(String(a.id || ''));
+    }
+    return 0;
   });
 }
 
