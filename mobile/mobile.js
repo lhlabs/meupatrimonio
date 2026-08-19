@@ -214,8 +214,20 @@ function formatDate(value) {
   return `${d}/${m}/${y}`;
 }
 function esc(value='') { return String(value).replace(/[&<>'"]/g,c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
+function createdAtMillis(value) {
+  if (!value) return 0;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  return safeNumber(value.seconds) * 1000 + safeNumber(value.nanoseconds) / 1000000;
+}
+function compareTransactions(a,b) {
+  const dateOrder = String(b.date || '').localeCompare(String(a.date || ''));
+  if (dateOrder) return dateOrder;
+  const createdOrder = createdAtMillis(b.createdAt) - createdAtMillis(a.createdAt);
+  if (createdOrder) return createdOrder;
+  return String(b.id || '').localeCompare(String(a.id || ''));
+}
 function renderRecent() {
-  const rows = txCache.slice().sort((a,b) => String(b.date).localeCompare(String(a.date)) || ((b.createdAt?.seconds||0)-(a.createdAt?.seconds||0))).slice(0,8);
+  const rows = txCache.slice().sort(compareTransactions).slice(0,8);
   $('#recentList').innerHTML = rows.length ? rows.map(tx => `
     <div class="recent-row">
       <div class="recent-icon">${tx.type === 'income' ? '+' : '−'}</div>
