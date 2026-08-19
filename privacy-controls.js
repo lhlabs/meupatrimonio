@@ -13,7 +13,7 @@ import {
   writeBatch
 } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-firestore.js";
 
-const USER_COLLECTIONS = ['transactions', 'positions', 'monthlyGoals', 'recurring', 'scheduled'];
+const USER_COLLECTIONS = ['monthlyGoals', 'transactions', 'positions', 'recurring', 'scheduled'];
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function resolveApp() {
@@ -34,15 +34,21 @@ async function deleteSnapshotInChunks(db, snapshot) {
 }
 
 async function deleteFirestoreUserData(db, uid) {
+  // Fail closed: as regras antigas bloqueiam a exclusão de config/planning.
+  // Assim, enquanto as novas regras não estiverem publicadas, o fluxo para
+  // aqui antes de remover lançamentos ou patrimônio parcialmente.
+  const planningBatch = writeBatch(db);
+  planningBatch.delete(doc(db, 'users', uid, 'config', 'planning'));
+  await planningBatch.commit();
+
   for (const name of USER_COLLECTIONS) {
     const snapshot = await getDocs(collection(db, 'users', uid, name));
     await deleteSnapshotInChunks(db, snapshot);
   }
 
-  const batch = writeBatch(db);
-  batch.delete(doc(db, 'users', uid, 'config', 'planning'));
-  batch.delete(doc(db, 'users', uid));
-  await batch.commit();
+  const rootBatch = writeBatch(db);
+  rootBatch.delete(doc(db, 'users', uid));
+  await rootBatch.commit();
 }
 
 function injectPrivacyPanel(deleteHandler) {
@@ -103,8 +109,10 @@ try {
         setStatus('Senha incorreta. Nenhum dado foi excluído antes da validação da identidade.', true);
       } else if (code.includes('requires-recent-login')) {
         setStatus('Sua sessão precisa ser renovada. Saia, entre novamente e repita a exclusão.', true);
+      } else if (code.includes('permission-denied')) {
+        setStatus('A exclusão integral ainda não está liberada pelas regras publicadas no Firebase. Nenhum lançamento ou patrimônio foi removido por este fluxo.', true);
       } else {
-        setStatus('Não foi possível concluir a exclusão integral. A conta foi mantida quando a remoção não pôde ser concluída com segurança.', true);
+        setStatus('Não foi possível concluir a exclusão integral. A conta foi mantida para evitar remover o acesso antes dos dados.', true);
       }
     } finally {
       button.disabled = false;
