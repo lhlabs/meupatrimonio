@@ -91,6 +91,111 @@ function userDoc(name,id) { return doc(db, 'users', user.uid, name, id); }
 function capitalize(value='') { return value ? value.charAt(0).toUpperCase() + value.slice(1) : ''; }
 function shiftDate(days) { const d = new Date(); d.setHours(12,0,0,0); d.setDate(d.getDate()+days); return ymd(d); }
 
+const numberWordValues = {
+  zero:0, um:1, uma:1, dois:2, duas:2, tres:3, quatro:4, cinco:5, seis:6, sete:7, oito:8, nove:9,
+  dez:10, onze:11, doze:12, treze:13, catorze:14, quatorze:14, quinze:15, dezesseis:16, dezasseis:16,
+  dezessete:17, dezassete:17, dezoito:18, dezenove:19, dezanove:19,
+  vinte:20, trinta:30, quarenta:40, cinquenta:50, sessenta:60, setenta:70, oitenta:80, noventa:90,
+  cem:100, cento:100, duzentos:200, duzentas:200, trezentos:300, trezentas:300, quatrocentos:400, quatrocentas:400,
+  quinhentos:500, quinhentas:500, seiscentos:600, seiscentas:600, setecentos:700, setecentas:700,
+  oitocentos:800, oitocentas:800, novecentos:900, novecentas:900
+};
+const numberScales = { mil:1000, milhao:1000000, milhoes:1000000 };
+function parseNumberWords(words) {
+  let total = 0, group = 0, seen = false;
+  for (const raw of words) {
+    const word = norm(raw);
+    if (word === 'e') continue;
+    if (Object.prototype.hasOwnProperty.call(numberWordValues,word)) {
+      group += numberWordValues[word];
+      seen = true;
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(numberScales,word)) {
+      const scale = numberScales[word];
+      if (scale === 1000) total += (group || 1) * scale;
+      else total = (total + (group || 1)) * scale;
+      group = 0;
+      seen = true;
+      continue;
+    }
+    return null;
+  }
+  return seen ? total + group : null;
+}
+function wordTokens(text) {
+  const tokens = [];
+  const regex = /[A-Za-zÀ-ÖØ-öø-ÿ]+/g;
+  let match;
+  while ((match = regex.exec(String(text)))) {
+    tokens.push({ raw:match[0], word:norm(match[0]), start:match.index, end:regex.lastIndex });
+  }
+  return tokens;
+}
+function extractWrittenAmount(text) {
+  const source = String(text || '');
+  const tokens = wordTokens(source);
+  for (let i = 0; i < tokens.length; i++) {
+    if (!(tokens[i].word in numberWordValues) && !(tokens[i].word in numberScales)) continue;
+    const words = [];
+    let j = i, lastNumberIndex = -1;
+    while (j < tokens.length) {
+      const word = tokens[j].word;
+      if ((word in numberWordValues) || (word in numberScales)) {
+        words.push(word);
+        lastNumberIndex = j;
+        j++;
+        continue;
+      }
+      if (word === 'e' && j + 1 < tokens.length && ((tokens[j+1].word in numberWordValues) || (tokens[j+1].word in numberScales))) {
+        words.push(word);
+        j++;
+        continue;
+      }
+      break;
+    }
+    if (lastNumberIndex < i) continue;
+    const amount = parseNumberWords(words);
+    if (!(amount > 0)) continue;
+    const standaloneArticle = lastNumberIndex === i && ['um','uma'].includes(tokens[i].word);
+    let endTokenIndex = lastNumberIndex;
+    let finalAmount = amount;
+    const after = tokens[lastNumberIndex+1]?.word;
+    if (after === 'real' || after === 'reais') {
+      endTokenIndex = lastNumberIndex + 1;
+      let centsStart = endTokenIndex + 1;
+      if (tokens[centsStart]?.word === 'e') centsStart++;
+      if (tokens[centsStart] && ((tokens[centsStart].word in numberWordValues) || (tokens[centsStart].word in numberScales))) {
+        const centsWords = [];
+        let k = centsStart, centsLast = -1;
+        while (k < tokens.length) {
+          const word = tokens[k].word;
+          if ((word in numberWordValues) || (word in numberScales)) {
+            centsWords.push(word);
+            centsLast = k;
+            k++;
+            continue;
+          }
+          if (word === 'e' && k + 1 < tokens.length && ((tokens[k+1].word in numberWordValues) || (tokens[k+1].word in numberScales))) {
+            centsWords.push(word);
+            k++;
+            continue;
+          }
+          break;
+        }
+        const cents = parseNumberWords(centsWords);
+        if (centsLast >= centsStart && cents >= 0 && cents < 100 && ['centavo','centavos'].includes(tokens[centsLast+1]?.word)) {
+          finalAmount += cents / 100;
+          endTokenIndex = centsLast + 1;
+        }
+      }
+    } else if (standaloneArticle) {
+      continue;
+    }
+    return { amount:finalAmount, token:source.slice(tokens[i].start,tokens[endTokenIndex].end) };
+  }
+  return { amount:0, token:'' };
+}
 function parseMoney(raw) {
   let value = String(raw || '').replace(/\s/g,'').replace(/^R\$/i,'');
   if (value.includes(',') && value.includes('.')) value = value.replace(/\./g,'').replace(',','.');
@@ -101,8 +206,8 @@ function parseMoney(raw) {
 }
 function extractAmount(text) {
   const match = String(text).match(/(?:r\$\s*)?(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:,\d{1,2})?|\d+\.\d{1,2})/i);
-  if (!match) return { amount:0, token:'' };
-  return { amount:parseMoney(match[1]), token:match[0] };
+  if (match) return { amount:parseMoney(match[1]), token:match[0] };
+  return extractWrittenAmount(text);
 }
 function inferType(text) {
   const n = norm(text);
