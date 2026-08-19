@@ -104,9 +104,9 @@ test('future recurring commitments do not inflate current reserve base', () => {
 
 test('recurring commitments starting later in the current month already count toward reserve', () => {
   const recurring=[
-    {active:true,type:'expense',amount:1200,category:'Moradia',startDate:'2026-08-25',endDate:''},
-    {active:true,type:'expense',amount:800,category:'Veículo',startDate:'2026-08-31',endDate:''},
-    {active:true,type:'expense',amount:500,category:'Mercado',startDate:'2026-09-01',endDate:''}
+    {active:true,type:'expense',amount:1200,dayOfMonth:25,category:'Moradia',startDate:'2026-08-25',endDate:''},
+    {active:true,type:'expense',amount:800,dayOfMonth:31,category:'Veículo',startDate:'2026-08-31',endDate:''},
+    {active:true,type:'expense',amount:500,dayOfMonth:1,category:'Mercado',startDate:'2026-09-01',endDate:''}
   ];
   assert.equal(activeRecurringExpenseTotal(recurring,'2026-08-19'),2000);
   const r=reserveMetrics({reserve:6000,transactions:[],recurring,todayYmd:'2026-08-19',targetMonths:6});
