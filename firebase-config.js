@@ -11,3 +11,10 @@ export const firebaseConfig = {
 
 // Chave pública do site para Firebase App Check + reCAPTCHA Enterprise.
 export const appCheckSiteKey = "6Lfm8lwtAAAAAAbXI--eqSShT9hfmmj6ezeBQpnJ";
+
+// Disponibiliza apenas a configuração pública para o módulo de cadastro e o carrega
+// de forma independente, sem alterar a lógica financeira principal do aplicativo.
+if (typeof window !== 'undefined') {
+  globalThis.__MP_FIREBASE_CONFIG__ = firebaseConfig;
+  import('./registration.js').catch(error => console.error('Cadastro indisponível.', error));
+}
