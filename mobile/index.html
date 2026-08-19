@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#07111f" />
+  <meta name="description" content="Meu Patrimônio no celular, com lançamento inteligente de receitas e despesas." />
+  <meta name="robots" content="noindex,nofollow,noarchive" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Patrimônio" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="./icon.svg" />
+  <link rel="stylesheet" href="./mobile.css" />
+  <title>Meu Patrimônio App</title>
+</head>
+<body>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <section id="authView" class="auth-shell">
+    <div class="auth-card panel">
+      <div class="brand"><span class="brand-mark">MP</span><div><small>APP PESSOAL</small><h1>Meu Patrimônio</h1></div></div>
+      <p class="muted">Entre com a mesma conta da versão web. Seus dados continuam no mesmo Firebase.</p>
+      <form id="loginForm" class="stack" autocomplete="on">
+        <label>E-mail<input id="email" type="email" autocomplete="username" required /></label>
+        <label>Senha<input id="password" type="password" autocomplete="current-password" required /></label>
+        <button class="primary" type="submit">Entrar</button>
+      </form>
+      <button id="resetPasswordBtn" class="text-button" type="button">Esqueci minha senha</button>
+      <div class="security">🔒 Firebase Auth + dados isolados por usuário</div>
+    </div>
+  </section>
+
+  <div id="appView" class="app hidden">
+    <header class="topbar safe-top">
+      <div class="brand compact"><span class="brand-mark">MP</span><div><small>MEU PATRIMÔNIO</small><strong>Visão rápida</strong></div></div>
+      <button id="logoutBtn" class="icon-button" type="button" aria-label="Sair">↪</button>
+    </header>
+
+    <main class="content">
+      <section class="hero panel">
+        <div>
+          <span class="kicker">PATRIMÔNIO LÍQUIDO</span>
+          <strong id="netWorth" class="hero-value">R$ 0,00</strong>
+          <small id="netWorthDetail" class="muted">Carregando...</small>
+        </div>
+        <span id="syncBadge" class="badge">Sincronizado</span>
+      </section>
+
+      <section class="metrics">
+        <article class="metric"><span>Saldo do mês</span><strong id="monthBalance">R$ 0,00</strong></article>
+        <article class="metric"><span>Receitas</span><strong id="monthIncome" class="income">R$ 0,00</strong></article>
+        <article class="metric"><span>Gastos</span><strong id="monthExpense" class="expense">R$ 0,00</strong></article>
+      </section>
+
+      <section id="quickSection" class="panel quick-card">
+        <div class="section-head">
+          <div><span class="kicker">LANÇAMENTO INTELIGENTE</span><h2>Escreva como você fala</h2></div>
+          <span class="ai-pill">RÁPIDO</span>
+        </div>
+        <div class="command-row">
+          <textarea id="smartInput" rows="2" maxlength="120" enterkeyhint="done" autocapitalize="sentences" placeholder="Ex.: gastei 42 no almoço"></textarea>
+          <button id="voiceBtn" class="voice-button" type="button" aria-label="Ditar lançamento">🎙</button>
+        </div>
+        <div class="examples" aria-label="Exemplos">
+          <button type="button" data-example="gastei 42 no almoço">42 almoço</button>
+          <button type="button" data-example="paguei 120 de academia">120 academia</button>
+          <button type="button" data-example="recebi 3500 de salário">3500 salário</button>
+        </div>
+
+        <div id="parseEmpty" class="parse-empty">Digite um valor e uma descrição. O app identifica tipo, categoria e data.</div>
+        <div id="parseCard" class="parse-card hidden">
+          <div class="preview-top"><span id="previewType" class="type-pill expense">Despesa</span><strong id="previewAmount">R$ 0,00</strong></div>
+          <div class="preview-grid">
+            <label>Tipo<select id="editType"><option value="expense">Despesa</option><option value="income">Receita</option></select></label>
+            <label>Categoria<select id="editCategory"></select></label>
+            <label class="wide">Descrição<input id="editDescription" maxlength="80" /></label>
+            <label>Data<input id="editDate" type="date" /></label>
+          </div>
+          <button id="saveSmartBtn" class="primary full" type="button">Registrar lançamento</button>
+        </div>
+        <button id="undoBtn" class="undo hidden" type="button">Desfazer último lançamento</button>
+      </section>
+
+      <section class="panel">
+        <div class="section-head"><div><span class="kicker">MOVIMENTAÇÕES</span><h2>Últimos lançamentos</h2></div><a class="text-link" href="../">Abrir web</a></div>
+        <div id="recentList" class="recent-list"><div class="empty">Nenhum lançamento.</div></div>
+      </section>
+
+      <section class="install-card panel">
+        <div><span class="kicker">INSTALAR NO CELULAR</span><h2>Use como aplicativo</h2><p id="installHint" class="muted">No iPhone: Compartilhar → Adicionar à Tela de Início.</p></div>
+        <button id="installBtn" class="secondary hidden" type="button">Instalar</button>
+      </section>
+    </main>
+
+    <nav class="bottom-bar safe-bottom">
+      <button class="active" type="button" data-scroll="top">⌂<small>Início</small></button>
+      <button type="button" data-scroll="quick">＋<small>Lançar</small></button>
+      <a href="../">▦<small>Web completa</small></a>
+    </nav>
+  </div>
+
+  <script type="module" src="./mobile.js"></script>
+</body>
+</html>
