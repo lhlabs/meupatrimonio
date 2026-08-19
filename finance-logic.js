@@ -61,6 +61,28 @@ export function contributionBalance(transactions, throughDate = null) {
   return Math.max(0, contributions - withdrawals);
 }
 
+export function positionMetrics(positions = [], transactions = [], throughDate = ymd(new Date())) {
+  const manualAssets = positions
+    .filter(item => ['asset', 'reserve'].includes(item?.type))
+    .reduce((sum, item) => sum + safeNumber(item.value), 0);
+  const reserve = positions
+    .filter(item => item?.type === 'reserve')
+    .reduce((sum, item) => sum + safeNumber(item.value), 0);
+  const debts = positions
+    .filter(item => item?.type === 'debt')
+    .reduce((sum, item) => sum + safeNumber(item.value), 0);
+  const contributionAssets = contributionBalance(transactions, throughDate);
+  const assets = manualAssets + contributionAssets;
+  return {
+    manualAssets,
+    contributionAssets,
+    assets,
+    reserve,
+    debts,
+    netWorth: assets - debts
+  };
+}
+
 export function monthMetrics(transactions, date) {
   const rows = monthRows(transactions, date);
   const income = rows.filter(item => item.type === 'income' && !isWithdrawal(item)).reduce((sum, item) => sum + safeNumber(item.amount), 0);
