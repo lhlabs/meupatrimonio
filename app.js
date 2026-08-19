@@ -232,7 +232,7 @@ function loadMonthlyGoalForm() {
   if (!key) return;
   const goal = monthlyGoalsCache.find(item => item.id === key || item.month === key);
   const date = dateFromMonthKey(key);
-  const metrics = date ? monthMetrics(txCache, date) : null;
+  const metrics = date ? monthMetrics(txCache, date, recurringCache) : null;
   const spendingGoal = monthlySpendingGoal(metrics?.income);
   $('#monthlyGoalContribution').value = goal?.monthlySurplusGoal ?? '';
   $('#monthlySpendingGoalInfo').textContent = metrics?.income > 0
@@ -500,11 +500,11 @@ function renderAll() {
 }
 
 function renderDashboard() {
-  const metrics = monthMetrics(txCache, selectedMonth);
+  const metrics = monthMetrics(txCache, selectedMonth, recurringCache);
   const positions = calcPositions();
   const goal = goalFor(selectedMonth);
   const prevDate = new Date(selectedMonth); prevDate.setMonth(prevDate.getMonth() - 1);
-  const prev = monthMetrics(txCache, prevDate);
+  const prev = monthMetrics(txCache, prevDate, recurringCache);
   const reserve = reserveMetrics({
     reserve: positions.reserve,
     transactions: txCache,
@@ -534,11 +534,11 @@ function renderDashboard() {
   if (metrics.income > 0) {
     $('#savingStatus').textContent = metrics.withdrawal > 0
       ? `Líquido ${currency.format(metrics.contribution)} · aportes ${currency.format(metrics.grossContribution)} · resgates ${currency.format(metrics.withdrawal)}`
-      : `${currency.format(metrics.contribution)} aportados de ${currency.format(metrics.income)} recebidos`;
+      : `${currency.format(metrics.contribution)} aportados de ${currency.format(metrics.income)} considerados no mês`;
   } else {
     $('#savingStatus').textContent = metrics.withdrawal > 0
       ? `Resgate de ${currency.format(metrics.withdrawal)} para o saldo do mês`
-      : 'Sem receita lançada no mês';
+      : 'Sem receita lançada ou recorrente no mês';
   }
 
   $('#debtValue').textContent = currency.format(spending.totalExpenses);
@@ -621,7 +621,7 @@ function renderScoreAndPet(score, context) {
 }
 
 function txRow(tx) {
-  const source = tx.sourceType === 'recurring' ? ' · recorrente' : tx.sourceType === 'scheduled' ? ' · agendada' : '';
+  const source = tx.sourceType === 'recurring' ? (tx.projected ? ' · recorrente prevista' : ' · recorrente') : tx.sourceType === 'scheduled' ? ' · agendada' : '';
   let actions = '';
   if (tx.sourceType) actions = '<span class="muted">Automático</span>';
   else if (isWithdrawal(tx)) actions = `<button class="mini-btn danger" data-delete-tx="${tx.id}">Excluir</button>`;
@@ -635,7 +635,7 @@ function renderTransactions() {
   const dateFrom = $('#txDateFrom')?.value || '';
   const dateTo = $('#txDateTo')?.value || '';
   let list = txCache.slice().sort((a,b) => String(b.date).localeCompare(String(a.date)));
-  if (!dateFrom && !dateTo) list = monthMetrics(txCache, selectedMonth).rows.slice().sort((a,b) => String(b.date).localeCompare(String(a.date)));
+  if (!dateFrom && !dateTo) list = monthMetrics(txCache, selectedMonth, recurringCache).rows.slice().sort((a,b) => String(b.date).localeCompare(String(a.date)));
   if (dateFrom) list = list.filter(tx => String(tx.date || '') >= dateFrom);
   if (dateTo) list = list.filter(tx => String(tx.date || '') <= dateTo);
   if (type !== 'all') list = list.filter(tx => tx.type === type);
@@ -657,7 +657,7 @@ function renderCashflow() {
   const rows = [];
   for (let i = 5; i >= 0; i--) {
     const d = new Date(selectedMonth); d.setMonth(d.getMonth() - i);
-    const m = monthMetrics(txCache, d);
+    const m = monthMetrics(txCache, d, recurringCache);
     rows.push({ label: d.toLocaleDateString('pt-BR',{month:'short'}).replace('.',''), income: m.income, expense: m.consumption });
   }
   $('#cashflowChart').innerHTML = barSvg(rows);
@@ -683,7 +683,7 @@ function renderDonut(metrics) {
 function renderInsights(metrics, positions, spending, spendingGoal, reserve) {
   const insights = [];
   const prev = new Date(selectedMonth); prev.setMonth(prev.getMonth() - 1);
-  const previous = monthMetrics(txCache, prev);
+  const previous = monthMetrics(txCache, prev, recurringCache);
   if (previous.consumption > 0) {
     const delta = (metrics.consumption - previous.consumption) / previous.consumption * 100;
     insights.push([delta <= 0 ? '📉' : '📈', 'Gastos vs. mês anterior', `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}% de variação no consumo.`]);
@@ -1109,7 +1109,7 @@ function exportExcel() {
   const goalRows = monthlyGoalsCache.map(g => {
     const key = g.month || g.id;
     const date = dateFromMonthKey(key);
-    const metrics = date ? monthMetrics(txCache, date) : { income: 0 };
+    const metrics = date ? monthMetrics(txCache, date, recurringCache) : { income: 0 };
     return [key, safeNumber(g.monthlySurplusGoal), metrics.income, monthlySpendingGoal(metrics.income)];
   });
   const sheets = [
