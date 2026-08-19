@@ -1,0 +1,99 @@
+name: One-off transaction period patch
+
+on:
+  push:
+    branches: [agent/corrige-gastos-e-filtro-periodo]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: agent/corrige-gastos-e-filtro-periodo
+      - name: Patch existing application files
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const replaceOrFail = (text, from, to, label) => {
+            if (!text.includes(from)) throw new Error(`Trecho não encontrado: ${label}`);
+            return text.replace(from, to);
+          };
+
+          let app = fs.readFileSync('app.js', 'utf8');
+          app = replaceOrFail(
+            app,
+            'nextRecurringDue, periodSpendingMetrics, positionMetrics, projectFutureValue,',
+            'nextRecurringDue, realizedSpendingMetrics, positionMetrics, projectFutureValue,',
+            'import realizedSpendingMetrics'
+          );
+          app = replaceOrFail(
+            app,
+            '  const spending = periodSpendingMetrics(txCache, recurringCache, selectedMonth);',
+            '  const spending = realizedSpendingMetrics(txCache, selectedMonth);',
+            'dashboard gasto realizado'
+          );
+          app = replaceOrFail(
+            app,
+`function renderTransactions() {
+  const type = $('#txTypeFilter').value;
+  const search = $('#txSearch').value.trim().toLowerCase();
+  let list = monthMetrics(txCache, selectedMonth).rows.slice().sort((a,b) => String(b.date).localeCompare(String(a.date)));
+  if (type !== 'all') list = list.filter(tx => tx.type === type);
+  if (search) list = list.filter(tx => String(tx.description || '').toLowerCase().includes(search) || String(tx.category || '').toLowerCase().includes(search));
+  $('#transactionsList').innerHTML = list.map(txRow).join('') || '<div class="empty-state">Nenhum lançamento.</div>';
+}`,
+`function renderTransactions() {
+  const type = $('#txTypeFilter').value;
+  const search = $('#txSearch').value.trim().toLowerCase();
+  const dateFrom = $('#txDateFrom')?.value || '';
+  const dateTo = $('#txDateTo')?.value || '';
+  let list = txCache.slice().sort((a,b) => String(b.date).localeCompare(String(a.date)));
+  if (!dateFrom && !dateTo) list = monthMetrics(txCache, selectedMonth).rows.slice().sort((a,b) => String(b.date).localeCompare(String(a.date)));
+  if (dateFrom) list = list.filter(tx => String(tx.date || '') >= dateFrom);
+  if (dateTo) list = list.filter(tx => String(tx.date || '') <= dateTo);
+  if (type !== 'all') list = list.filter(tx => tx.type === type);
+  if (search) list = list.filter(tx => String(tx.description || '').toLowerCase().includes(search) || String(tx.category || '').toLowerCase().includes(search));
+  $('#transactionsList').innerHTML = list.map(txRow).join('') || '<div class="empty-state">Nenhum lançamento no período informado.</div>';
+}`,
+            'filtro de período'
+          );
+          app = replaceOrFail(
+            app,
+`$('#txTypeFilter').addEventListener('change', renderTransactions);
+$('#txSearch').addEventListener('input', renderTransactions);`,
+`$('#txTypeFilter').addEventListener('change', renderTransactions);
+$('#txSearch').addEventListener('input', renderTransactions);
+$('#txDateFrom')?.addEventListener('change', renderTransactions);
+$('#txDateTo')?.addEventListener('change', renderTransactions);
+$('#txPeriodReset')?.addEventListener('click', () => {
+  $('#txDateFrom').value = '';
+  $('#txDateTo').value = '';
+  renderTransactions();
+});`,
+            'listeners de período'
+          );
+          fs.writeFileSync('app.js', app);
+
+          let html = fs.readFileSync('index.html', 'utf8');
+          html = replaceOrFail(
+            html,
+            '<div class="filters glass"><select id="txTypeFilter"><option value="all">Todos</option><option value="expense">Despesas</option><option value="income">Receitas</option></select><input id="txSearch" type="search" placeholder="Buscar descrição ou categoria" /></div>',
+            '<div class="filters glass"><select id="txTypeFilter"><option value="all">Todos</option><option value="expense">Despesas</option><option value="income">Receitas</option></select><input id="txDateFrom" type="date" aria-label="Período inicial" title="De" /><input id="txDateTo" type="date" aria-label="Período final" title="Até" /><input id="txSearch" type="search" placeholder="Buscar descrição ou categoria" /><button id="txPeriodReset" class="ghost-btn" type="button">Mês selecionado</button></div>',
+            'campos de período'
+          );
+          fs.writeFileSync('index.html', html);
+          NODE
+      - name: Commit patched files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.js index.html
+          git diff --cached --check
+          git commit -m "Corrige gasto do mês e adiciona filtro de período"
+          git push origin HEAD:agent/corrige-gastos-e-filtro-periodo
