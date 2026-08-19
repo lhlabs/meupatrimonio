@@ -86,8 +86,56 @@ export function positionMetrics(positions = [], transactions = [], throughDate =
   };
 }
 
-export function monthMetrics(transactions, date) {
-  const rows = monthRows(transactions, date);
+export function recurringDue(recurring, date) {
+  if (!recurring?.active) return null;
+  const due = dueDateFor(date.getFullYear(), date.getMonth(), recurring.dayOfMonth);
+  const dueMonth = due.slice(0, 7);
+  const startMonth = String(recurring.startDate || '').slice(0, 7);
+  if (String(recurring.id || '').startsWith('legacy_') && startMonth && dueMonth === startMonth) return null;
+  if (startMonth && dueMonth < startMonth) return null;
+  if (recurring.endDate && due > recurring.endDate) return null;
+  return due;
+}
+
+export function projectedRecurringRows(transactions = [], recurring = [], date, now = new Date()) {
+  const key = monthKey(date);
+  const currentKey = monthKey(now);
+  if (key < currentKey) return [];
+
+  return recurring
+    .filter(item => item?.active === true && ['income', 'expense'].includes(item.type) && safeNumber(item.amount) > 0)
+    .map(item => ({ item, due: recurringDue(item, date) }))
+    .filter(({ due }) => !!due)
+    .filter(({ item }) => !transactions.some(tx =>
+      tx?.sourceType === 'recurring'
+      && tx?.sourceId === item.id
+      && String(tx?.date || '').startsWith(key)
+    ))
+    .map(({ item, due }) => ({
+      id: `projected_rec_${item.id}_${key}`,
+      type: item.type,
+      amount: safeNumber(item.amount),
+      category: item.category,
+      description: item.name || item.description || '',
+      date: due,
+      recurring: true,
+      sourceType: 'recurring',
+      sourceId: item.id,
+      projected: true
+    }));
+}
+
+export function effectiveMonthRows(transactions = [], recurring = [], date, now = new Date()) {
+  return [
+    ...monthRows(transactions, date),
+    ...projectedRecurringRows(transactions, recurring, date, now)
+  ];
+}
+
+export function monthMetrics(transactions, date, recurring = [], now = new Date()) {
+  const rows = recurring?.length
+    ? effectiveMonthRows(transactions, recurring, date, now)
+    : monthRows(transactions, date);
   const income = rows.filter(item => item.type === 'income' && !isWithdrawal(item)).reduce((sum, item) => sum + safeNumber(item.amount), 0);
   const withdrawal = rows.filter(isWithdrawal).reduce((sum, item) => sum + safeNumber(item.amount), 0);
   const grossContribution = rows.filter(isContribution).reduce((sum, item) => sum + safeNumber(item.amount), 0);
@@ -123,17 +171,6 @@ export function dailyVariableAverage(transactions, date, now = new Date()) {
   return metrics.variableConsumption / daysElapsedInMonth(date, now);
 }
 
-export function recurringDue(recurring, date) {
-  if (!recurring?.active) return null;
-  const due = dueDateFor(date.getFullYear(), date.getMonth(), recurring.dayOfMonth);
-  const dueMonth = due.slice(0, 7);
-  const startMonth = String(recurring.startDate || '').slice(0, 7);
-  if (String(recurring.id || '').startsWith('legacy_') && startMonth && dueMonth === startMonth) return null;
-  if (startMonth && dueMonth < startMonth) return null;
-  if (recurring.endDate && due > recurring.endDate) return null;
-  return due;
-}
-
 export function nextRecurringDue(recurring, fromDate = new Date()) {
   if (!recurring?.active) return null;
   const startDay = new Date(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate());
@@ -164,9 +201,7 @@ export function recurringExpenseTotalForMonth(recurring, date) {
 }
 
 export function periodSpendingMetrics(transactions, recurring, date, now = new Date()) {
-  void recurring;
-  void now;
-  const rows = monthRows(transactions, date);
+  const rows = effectiveMonthRows(transactions, recurring, date, now);
   const recurringExpenses = rows
     .filter(item => item?.type === 'expense' && !isContribution(item))
     .filter(item => item.sourceType === 'recurring' || item.recurring === true)
