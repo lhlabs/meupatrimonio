@@ -4,6 +4,7 @@ service cloud.firestore {
     function signedIn() { return request.auth != null; }
     function owns(userId) { return signedIn() && request.auth.uid == userId; }
     function validDate(v) { return v is string && v.matches('^\\d{4}-\\d{2}-\\d{2}$'); }
+    function validMonth(v) { return v is string && v.matches('^\\d{4}-\\d{2}$'); }
     function validMoney(v) { return v is number && v >= 0 && v < 1000000000; }
 
     function validTransaction() {
@@ -37,6 +38,17 @@ service cloud.firestore {
         && validMoney(request.resource.data.financialFreedomMonthlyCost)
         && request.resource.data.realReturn is number && request.resource.data.realReturn >= 0 && request.resource.data.realReturn <= 20
         && request.resource.data.reserveTargetMonths is number && request.resource.data.reserveTargetMonths >= 1 && request.resource.data.reserveTargetMonths <= 24
+        && request.resource.data.updatedAt is timestamp;
+    }
+
+    function validMonthlyGoal(monthId) {
+      return request.resource.data.keys().hasOnly(['month','monthlySurplusGoal','dailySpendGoal','createdAt','updatedAt'])
+        && request.resource.data.keys().hasAll(['month','monthlySurplusGoal','dailySpendGoal','createdAt','updatedAt'])
+        && validMonth(request.resource.data.month)
+        && request.resource.data.month == monthId
+        && validMoney(request.resource.data.monthlySurplusGoal)
+        && validMoney(request.resource.data.dailySpendGoal)
+        && request.resource.data.createdAt is timestamp
         && request.resource.data.updatedAt is timestamp;
     }
 
@@ -76,6 +88,7 @@ service cloud.firestore {
       match /transactions/{txId} { allow read, delete: if owns(userId); allow create, update: if owns(userId) && validTransaction(); }
       match /positions/{positionId} { allow read, delete: if owns(userId); allow create, update: if owns(userId) && validPosition(); }
       match /config/planning { allow read: if owns(userId); allow create, update: if owns(userId) && validPlanning(); allow delete: if false; }
+      match /monthlyGoals/{monthId} { allow read: if owns(userId); allow create, update: if owns(userId) && validMonthlyGoal(monthId); allow delete: if false; }
       match /recurring/{recurringId} { allow read, delete: if owns(userId); allow create, update: if owns(userId) && validRecurring(); }
       match /scheduled/{scheduledId} { allow read, delete: if owns(userId); allow create, update: if owns(userId) && validScheduled(); }
     }
