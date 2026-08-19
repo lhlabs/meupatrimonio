@@ -4,79 +4,129 @@ import { readFileSync } from 'node:fs';
 
 const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
-const rules = read('firestore.rules');
-const firebaseConfig = JSON.parse(read('firebase.json'));
-const firebaseRc = JSON.parse(read('.firebaserc'));
-const publicFirebaseConfig = read('firebase-config.js');
-const app = read('app.js');
-const mobile = read('mobile/mobile.js');
+const schema = read('supabase/migrations/001_initial_schema.sql');
+const timestampGuards = read('supabase/migrations/002_server_timestamp_guards.sql');
+const supabaseConfig = read('supabase-config.js');
+const supabaseClient = read('supabase-client.js');
+const authCompat = read('compat/firebase-auth.js');
+const firestoreCompat = read('compat/firebase-firestore.js');
+const deleteAccount = read('supabase/functions/delete-account/index.ts');
 const hardening = read('security-hardening.js');
 const gitignore = read('.gitignore');
 const workflow = read('.github/workflows/pages.yml');
 const codeql = read('.github/workflows/codeql.yml');
+const rootSw = read('sw.js');
+const mobileSw = read('mobile/sw.js');
 
-const privateCollections = ['transactions', 'positions', 'monthlyGoals', 'recurring', 'scheduled'];
+const privateTables = ['transactions', 'positions', 'planning', 'monthlyGoals', 'recurring', 'scheduled'];
 
-test('Firestore mantém isolamento por UID e deny by default', () => {
-  assert.match(rules, /function\s+owns\(userId\)\s*\{[^}]*request\.auth\.uid\s*==\s*userId/s);
-  assert.match(rules, /match\s+\/users\/\{userId\}/);
-  for (const collection of privateCollections) {
-    assert.match(rules, new RegExp(`match\\s+\\/${collection}\\/\\{[^}]+\\}`));
+test('Supabase ativa e força RLS em todas as tabelas financeiras', () => {
+  for (const table of privateTables) {
+    const sqlName = table === 'monthlyGoals' ? '"monthlyGoals"' : table;
+    assert.match(schema, new RegExp(`alter table public\\.${sqlName.replace(/["\\]/g, '\\$&')} enable row level security`, 'i'));
+    assert.match(schema, new RegExp(`alter table public\\.${sqlName.replace(/["\\]/g, '\\$&')} force row level security`, 'i'));
   }
-  assert.match(rules, /match\s+\/\{document=\*\*\}\s*\{\s*allow\s+read,\s*write:\s*if\s*false;\s*\}/s);
-  assert.doesNotMatch(rules, /allow\s+read,\s*write:\s*if\s*true/);
+  assert.match(schema, /revoke all on table[\s\S]*from anon;/i);
 });
 
-test('Firestore exige autenticação para dados privados', () => {
-  assert.match(rules, /function\s+signedIn\(\)\s*\{\s*return\s+request\.auth\s*!=\s*null;\s*\}/s);
-  assert.match(rules, /function\s+canUsePrivateData\(userId\)/);
-  assert.match(rules, /emailVerified\(\)/);
-});
-
-test('Firestore limita categorias e IDs graváveis para reduzir manipulação e injeção', () => {
-  assert.match(rules, /function\s+validDocumentId\(v\).*\^\[A-Za-z0-9_-\]\{1,160\}\$/s);
-  assert.match(rules, /function\s+validBaseCategory\(type, category\)/);
-  for (const category of ['Moradia', 'Academia', 'Investimentos/Aportes', 'Salário', 'Renda extra', 'Outros']) {
-    assert.ok(rules.includes(`'${category}'`), `categoria esperada ausente: ${category}`);
+test('RLS limita CRUD ao proprietário autenticado', () => {
+  for (const policy of [
+    'transactions_owner_only',
+    'positions_owner_only',
+    'planning_owner_only',
+    'monthly_goals_owner_only',
+    'recurring_owner_only',
+    'scheduled_owner_only'
+  ]) {
+    assert.ok(schema.includes(`create policy ${policy}`), `política ausente: ${policy}`);
   }
-  assert.match(rules, /type\s*==\s*'income'\s*&&\s*category\s*==\s*'Resgate de Patrimônio'/);
-  for (const id of ['txId', 'positionId', 'recurringId', 'scheduledId']) {
-    assert.match(rules, new RegExp(`validDocumentId\\(${id}\\)`));
+  const ownershipChecks = schema.match(/\(select auth\.uid\(\)\) = user_id/g) || [];
+  assert.ok(ownershipChecks.length >= 12, 'USING e WITH CHECK devem validar auth.uid() em todas as políticas');
+  assert.match(schema, /for all to authenticated/i);
+});
+
+test('Dados financeiros são vinculados a auth.users com cascade delete', () => {
+  const references = schema.match(/references auth\.users\(id\) on delete cascade/g) || [];
+  assert.equal(references.length, 6);
+  assert.match(schema, /user_id uuid not null default auth\.uid\(\)/);
+});
+
+test('Banco preserva validações financeiras e IDs graváveis', () => {
+  assert.match(schema, /\^\[A-Za-z0-9_-\]\{1,160\}\$/);
+  for (const category of ['Moradia', 'Academia', 'Investimentos/Aportes', 'Salário', 'Renda extra', 'Resgate de Patrimônio']) {
+    assert.ok(schema.includes(`'${category}'`), `categoria esperada ausente: ${category}`);
   }
-  assert.doesNotMatch(rules, /request\.resource\.data\.category\s+is\s+string\s+&&\s+request\.resource\.data\.category\.size\(\)\s*>\s*0/);
+  assert.match(schema, /amount > 0 and amount < 100000000/);
+  assert.match(schema, /"reserveTargetMonths" between 1 and 24/);
 });
 
-test('Firebase CLI usa exatamente as rules versionadas neste repositório', () => {
-  assert.equal(firebaseConfig.firestore?.rules, 'firestore.rules');
-  assert.equal(firebaseRc.projects?.default, 'meupatrimonio-4c878');
-});
-
-test('Web e mobile inicializam App Check', () => {
-  for (const source of [app, mobile]) {
-    assert.match(source, /initializeAppCheck/);
-    assert.match(source, /ReCaptchaEnterpriseProvider/);
-    assert.match(source, /isTokenAutoRefreshEnabled:\s*true/);
+test('Timestamps críticos são controlados pelo PostgreSQL', () => {
+  assert.match(timestampGuards, /new\."createdAt" = now\(\)/);
+  assert.match(timestampGuards, /new\."updatedAt" = now\(\)/);
+  for (const table of ['transactions', 'positions', 'monthly_goals', 'recurring', 'scheduled', 'planning']) {
+    assert.ok(timestampGuards.toLowerCase().includes(table), `trigger de timestamp ausente para ${table}`);
   }
+  assert.match(schema, /new\."createdAt" = old\."createdAt"/);
 });
 
-test('Camada de sessão reduz persistência, aplica ordem determinística e encerra por inatividade', () => {
+test('Frontend usa apenas URL e publishable key do Supabase', () => {
+  assert.match(supabaseConfig, /__SUPABASE_URL__/);
+  assert.match(supabaseConfig, /__SUPABASE_PUBLISHABLE_KEY__/);
+  assert.match(supabaseConfig, /sb_publishable_/);
+  assert.match(supabaseClient, /createClient/);
+  assert.match(supabaseClient, /sessionStorage/);
+  assert.doesNotMatch(`${supabaseConfig}\n${supabaseClient}`, /service[_-]?role/i);
+  assert.doesNotMatch(`${supabaseConfig}\n${supabaseClient}`, /sb_secret_/i);
+});
+
+test('Autenticação foi redirecionada para Supabase Auth', () => {
+  for (const method of [
+    'signInWithPassword',
+    'signUp',
+    'resend',
+    'resetPasswordForEmail',
+    'onAuthStateChange',
+    'updateUser'
+  ]) {
+    assert.ok(authCompat.includes(method), `método Supabase ausente: ${method}`);
+  }
+  assert.match(authCompat, /email not confirmed/);
+  assert.match(authCompat, /PASSWORD_RECOVERY/);
+});
+
+test('CRUD legado resolve somente para tabelas Supabase conhecidas', () => {
+  assert.match(firestoreCompat, /\['transactions','positions','monthlyGoals','recurring','scheduled'\]/);
+  assert.match(firestoreCompat, /supabase\.from\(ref\.table\)/);
+  assert.match(firestoreCompat, /\.eq\('user_id', ref\.userId\)/);
+  assert.match(firestoreCompat, /Coleção não suportada/);
+});
+
+test('Exclusão de conta mantém service role somente no servidor', () => {
+  assert.match(authCompat, /functions\.invoke\('delete-account'/);
+  assert.match(deleteAccount, /SUPABASE_SERVICE_ROLE_KEY/);
+  assert.match(deleteAccount, /auth\.getUser\(token\)/);
+  assert.match(deleteAccount, /auth\.admin\.deleteUser\(userData\.user\.id\)/);
+  assert.doesNotMatch(authCompat, /SUPABASE_SERVICE_ROLE_KEY/);
+});
+
+test('Camada de sessão mantém política forte e encerra por inatividade', () => {
   assert.match(hardening, /browserSessionPersistence/);
-  assert.match(hardening, /setPersistence\(auth,\s*browserSessionPersistence\)/);
   assert.match(hardening, /15\s*\*\s*60\s*\*\s*1000/);
   assert.match(hardening, /signOut\(auth\)/);
-  assert.match(publicFirebaseConfig, /window\.addEventListener\('load',\s*loadSessionHardening,\s*\{\s*once:\s*true\s*\}\)/);
-  assert.match(publicFirebaseConfig, /import\('\.\/security-hardening\.js'\)/);
-  assert.doesNotMatch(publicFirebaseConfig, /Promise\.allSettled\(\[\s*import\('\.\/security-hardening\.js'\)/s);
-});
-
-test('Cadastro mantém política forte de 12 caracteres na camada efetiva', () => {
   assert.match(hardening, /password\.length\s*>=\s*12/);
   assert.match(hardening, /\[a-z\]/);
   assert.match(hardening, /\[A-Z\]/);
   assert.match(hardening, /\\d/);
   assert.match(hardening, /\[\^A-Za-z0-9\]/);
-  assert.match(hardening, /field\.minLength\s*=\s*12/);
-  assert.match(hardening, /pelo menos 8 caracteres\|mínimo 8 caracteres\|no mínimo 8 caracteres/i);
+});
+
+test('PWA inclui a nova camada de infraestrutura no cache de aplicação', () => {
+  for (const sw of [rootSw, mobileSw]) {
+    assert.match(sw, /supabase-config\.js/);
+    assert.match(sw, /supabase-client\.js/);
+    assert.match(sw, /compat\/firebase-auth\.js/);
+    assert.match(sw, /compat\/firebase-firestore\.js/);
+  }
 });
 
 test('Arquivos típicos de credenciais privadas permanecem ignorados', () => {
