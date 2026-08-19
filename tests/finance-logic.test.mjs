@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   dueDateFor, addYear, isContribution, isWithdrawal, contributionBalance, monthMetrics,
   nextRecurringDue, activeRecurringExpenseTotal, completedConsumptionHistory,
-  periodSpendingMetrics, reserveMetrics, scoreMetrics, projectFutureValue
+  monthlySpendingGoal, periodSpendingMetrics, reserveMetrics, scoreMetrics, projectFutureValue
 } from '../finance-logic.js';
 
 test('dueDateFor clamps invalid month-end days', () => {
@@ -32,6 +32,20 @@ test('contributions are separated from consumption and cash balance', () => {
   assert.equal(m.balance, 2500);
   assert.equal(m.contributionRate, 20);
   assert.equal(isContribution(tx[1]), true);
+});
+
+test('monthly spending goal is exactly 60% of income and contributions are not spending', () => {
+  const tx = [
+    {type:'income', amount:10000, date:'2026-08-01', category:'Salário'},
+    {type:'expense', amount:2500, date:'2026-08-02', category:'Investimentos/Aportes'},
+    {type:'expense', amount:3500, date:'2026-08-03', category:'Moradia'},
+    {type:'expense', amount:1500, date:'2026-08-04', category:'Mercado'}
+  ];
+  const m = monthMetrics(tx, new Date(2026,7,1));
+  assert.equal(monthlySpendingGoal(m.income), 6000);
+  assert.equal(m.consumption, 5000);
+  assert.equal(m.grossContribution, 2500);
+  assert.equal(m.totalOut, 7500);
 });
 
 test('withdrawal moves patrimony back to monthly cash without becoming income', () => {
@@ -199,14 +213,23 @@ test('reserve target is exactly six months of recurring expenses when configured
   assert.equal(r.progress,0.5);
 });
 
-test('score requires the two user-controlled monthly goals', () => {
-  assert.equal(scoreMetrics({contribution:1000,contributionGoal:0,dailyAverage:20,dailyGoal:50,reserveProgress:1}).score,null);
-  const partial=scoreMetrics({contribution:1000,contributionGoal:1000,dailyAverage:40,dailyGoal:50,reserveProgress:null});
+test('score uses contribution goal and automatic monthly spending goal', () => {
+  assert.equal(scoreMetrics({contribution:1000,contributionGoal:0,spending:4000,spendingGoal:6000,reserveProgress:1}).score,null);
+  assert.equal(scoreMetrics({contribution:1000,contributionGoal:1000,spending:4000,spendingGoal:0,reserveProgress:1}).score,null);
+  const partial=scoreMetrics({contribution:1000,contributionGoal:1000,spending:4000,spendingGoal:6000,reserveProgress:null});
   assert.equal(partial.completeness,75);
   assert.equal(partial.score,75);
-  const s=scoreMetrics({contribution:1000,contributionGoal:1000,dailyAverage:40,dailyGoal:50,reserveProgress:0.5});
+  assert.equal(partial.spendingScore,1);
+  const s=scoreMetrics({contribution:1000,contributionGoal:1000,spending:4000,spendingGoal:6000,reserveProgress:0.5});
   assert.equal(s.completeness,100);
   assert.equal(s.score,88);
+  assert.equal(s.spendingScore,1);
+});
+
+test('score penalizes monthly spending above 60% target', () => {
+  const s=scoreMetrics({contribution:1000,contributionGoal:1000,spending:7500,spendingGoal:6000,reserveProgress:1});
+  assert.equal(s.spendingScore,0.8);
+  assert.equal(s.score,93);
 });
 
 test('projection handles zero real rate', () => {
