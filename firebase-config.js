@@ -1,5 +1,6 @@
 import "./enhancements.js";
 import "./integrity.js";
+import "./finance-v3.js";
 
 // Configuração pública do Firebase Web SDK.
 // Não contém senha nem credencial administrativa; a autorização real é feita por Authentication + Firestore Rules.
