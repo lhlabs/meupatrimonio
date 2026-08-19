@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   dueDateFor, addYear, isContribution, isWithdrawal, contributionBalance, monthMetrics,
-  nextRecurringDue, activeRecurringExpenseTotal, reserveMetrics, scoreMetrics, projectFutureValue
+  nextRecurringDue, activeRecurringExpenseTotal, completedConsumptionHistory,
+  reserveMetrics, scoreMetrics, projectFutureValue
 } from '../finance-logic.js';
 
 test('dueDateFor clamps invalid month-end days', () => {
@@ -53,6 +54,15 @@ test('withdrawal moves patrimony back to monthly cash without becoming income', 
   assert.equal(contributionBalance(tx), 600);
 });
 
+test('new contributions accumulate immediately in derived patrimony', () => {
+  const tx = [
+    {id:'old',type:'expense',amount:1000,date:'2026-08-01',category:'Investimentos/Aportes'},
+    {id:'new1',type:'expense',amount:750,date:'2026-08-18',category:'Investimentos/Aportes'},
+    {id:'new2',type:'expense',amount:250,date:'2026-08-19',category:'Investimentos/Aportes'}
+  ];
+  assert.equal(contributionBalance(tx), 2000);
+});
+
 test('deleting a contribution automatically lowers derived patrimony', () => {
   const tx = [
     {id:'a',type:'expense',amount:1000,date:'2026-08-02',category:'Investimentos/Aportes'},
@@ -60,6 +70,15 @@ test('deleting a contribution automatically lowers derived patrimony', () => {
   ];
   assert.equal(contributionBalance(tx),1500);
   assert.equal(contributionBalance(tx.filter(item=>item.id!=='b')),1000);
+});
+
+test('withdrawal reduces derived patrimony by exactly the amount returned to cash', () => {
+  const tx = [
+    {type:'expense',amount:2000,date:'2026-08-01',category:'Investimentos/Aportes'},
+    {type:'income',amount:600,date:'2026-08-18',category:'Resgate de Patrimônio'}
+  ];
+  assert.equal(contributionBalance(tx),1400);
+  assert.equal(monthMetrics(tx,new Date(2026,7,1)).balance,-1400);
 });
 
 test('derived patrimony never becomes negative after withdrawals', () => {
@@ -83,14 +102,52 @@ test('future recurring commitments do not inflate current reserve base', () => {
   assert.equal(activeRecurringExpenseTotal(recurring,'2026-08-18'),500);
 });
 
-test('reserve base uses the larger of recurring commitments and historical consumption', () => {
-  const tx=[];
-  for(let m=1;m<=6;m++) tx.push({type:'expense',amount:2000,date:`2026-${String(m).padStart(2,'0')}-10`,category:'Mercado'});
-  const recurring=[{active:true,type:'expense',amount:1500,category:'Moradia',endDate:''}];
-  const r=reserveMetrics({reserve:12000,transactions:tx,recurring,referenceDate:new Date(2026,6,1),todayYmd:'2026-07-01',targetMonths:6});
+test('completed consumption history ignores the current partial month', () => {
+  const tx=[
+    {type:'expense',amount:6397,date:'2026-08-10',category:'Mercado'},
+    {type:'expense',amount:2000,date:'2026-07-10',category:'Mercado'}
+  ];
+  const history=completedConsumptionHistory(tx,'2026-08-18',6);
+  assert.deepEqual(history.values,[2000]);
+  assert.equal(history.average,2000);
+  assert.equal(history.months,1);
+});
+
+test('reserve target is stable when user navigates from August to September', () => {
+  const tx=[{type:'expense',amount:6397,date:'2026-08-10',category:'Mercado'}];
+  const recurring=[{active:true,type:'expense',amount:2000,category:'Moradia',startDate:'2026-01-01',endDate:''}];
+  const august=reserveMetrics({reserve:20000,transactions:tx,recurring,referenceDate:new Date(2026,7,1),todayYmd:'2026-08-18',targetMonths:6});
+  const september=reserveMetrics({reserve:20000,transactions:tx,recurring,referenceDate:new Date(2026,8,1),todayYmd:'2026-08-18',targetMonths:6});
+  assert.equal(august.monthlyBase,2000);
+  assert.equal(august.target,12000);
+  assert.equal(september.monthlyBase,2000);
+  assert.equal(september.target,12000);
+  assert.equal(september.target,august.target);
+});
+
+test('one completed high-spend month does not override known recurring reserve base', () => {
+  const tx=[{type:'expense',amount:6397,date:'2026-08-10',category:'Mercado'}];
+  const recurring=[{active:true,type:'expense',amount:2000,category:'Moradia',startDate:'2026-01-01',endDate:''}];
+  const r=reserveMetrics({reserve:20000,transactions:tx,recurring,referenceDate:new Date(2026,9,1),todayYmd:'2026-09-01',targetMonths:6});
+  assert.equal(r.historyMonths,1);
+  assert.equal(r.observedHistoricalBase,6397);
+  assert.equal(r.historicalBase,0);
   assert.equal(r.monthlyBase,2000);
-  assert.equal(r.months,6);
   assert.equal(r.target,12000);
+});
+
+test('reserve base can use mature historical consumption when at least three months exist', () => {
+  const tx=[
+    {type:'expense',amount:3000,date:'2026-07-10',category:'Mercado'},
+    {type:'expense',amount:3000,date:'2026-06-10',category:'Mercado'},
+    {type:'expense',amount:3000,date:'2026-05-10',category:'Mercado'}
+  ];
+  const recurring=[{active:true,type:'expense',amount:2000,category:'Moradia',startDate:'2026-01-01',endDate:''}];
+  const r=reserveMetrics({reserve:18000,transactions:tx,recurring,todayYmd:'2026-08-18',targetMonths:6});
+  assert.equal(r.historyMonths,3);
+  assert.equal(r.historicalBase,3000);
+  assert.equal(r.monthlyBase,3000);
+  assert.equal(r.target,18000);
   assert.equal(r.progress,1);
 });
 

@@ -124,14 +124,43 @@ export function rollingConsumptionAverage(transactions, referenceDate = new Date
   return values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
 }
 
+export function completedConsumptionHistory(transactions, todayYmd = ymd(new Date()), maxMonths = 6) {
+  const [year, month] = String(todayYmd).split('-').map(Number);
+  const anchor = Number.isFinite(year) && Number.isFinite(month) ? new Date(year, month - 1, 1) : new Date();
+  anchor.setDate(1);
+  const values = [];
+  for (let offset = 1; offset <= maxMonths; offset += 1) {
+    const date = new Date(anchor.getFullYear(), anchor.getMonth() - offset, 1);
+    const metrics = monthMetrics(transactions, date);
+    if (metrics.consumption > 0) values.push(metrics.consumption);
+  }
+  const average = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+  return { average, months: values.length, values };
+}
+
 export function reserveMetrics({ reserve, transactions, recurring, referenceDate = new Date(), todayYmd = ymd(new Date()), targetMonths = 6 }) {
+  // A reserva é uma posição patrimonial atual. Navegar entre meses do dashboard não deve alterar sua meta.
+  // O histórico usa somente meses concluídos até "hoje", evitando que um mês parcial/futuro distorça a base.
+  void referenceDate;
   const recurringBase = activeRecurringExpenseTotal(recurring, todayYmd);
-  const historicalBase = rollingConsumptionAverage(transactions, referenceDate, 6);
+  const history = completedConsumptionHistory(transactions, todayYmd, 6);
+  // Com pouco histórico e contas recorrentes conhecidas, priorizamos a base recorrente para evitar saltos artificiais.
+  // Sem recorrências, o histórico disponível ainda pode servir como aproximação inicial.
+  const historicalBase = history.months >= 3 || recurringBase === 0 ? history.average : 0;
   const monthlyBase = Math.max(recurringBase, historicalBase);
   const months = monthlyBase > 0 ? safeNumber(reserve) / monthlyBase : null;
   const target = monthlyBase > 0 ? monthlyBase * Math.max(1, safeNumber(targetMonths) || 6) : null;
   const progress = target ? clamp(safeNumber(reserve) / target, 0, 1) : null;
-  return { recurringBase, historicalBase, monthlyBase, months, target, progress };
+  return {
+    recurringBase,
+    historicalBase,
+    observedHistoricalBase: history.average,
+    historyMonths: history.months,
+    monthlyBase,
+    months,
+    target,
+    progress
+  };
 }
 
 export function scoreMetrics({ contribution, contributionGoal, dailyAverage, dailyGoal, reserveProgress }) {
