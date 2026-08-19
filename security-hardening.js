@@ -26,8 +26,12 @@ function now() {
 }
 
 function getLastActivity() {
-  const stored = Number(sessionStorage.getItem(IDLE_STORAGE_KEY));
-  return Number.isFinite(stored) && stored > 0 ? stored : now();
+  try {
+    const stored = Number(sessionStorage.getItem(IDLE_STORAGE_KEY));
+    return Number.isFinite(stored) && stored > 0 ? stored : now();
+  } catch (_) {
+    return now();
+  }
 }
 
 function setLastActivity(value = now()) {
@@ -60,7 +64,7 @@ function installRegistrationPasswordGuard() {
     }
   }, true);
 
-  const observer = new MutationObserver(() => {
+  const applyPasswordUi = () => {
     const input = document.querySelector('#registerPassword');
     const confirm = document.querySelector('#registerPasswordConfirm');
     [input, confirm].forEach(field => {
@@ -68,6 +72,14 @@ function installRegistrationPasswordGuard() {
       field.minLength = 12;
       field.maxLength = 128;
     });
+    const helper = document.querySelector('#registerPanel small.muted');
+    if (helper) helper.textContent = 'Use 12 ou mais caracteres, com maiúscula, minúscula, número e símbolo. Não reutilize senhas.';
+    return !!input && !!confirm && !!helper;
+  };
+
+  if (applyPasswordUi()) return;
+  const observer = new MutationObserver(() => {
+    if (applyPasswordUi()) observer.disconnect();
   });
   observer.observe(document.documentElement, { childList: true, subtree: true });
 }
