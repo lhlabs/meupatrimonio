@@ -29,10 +29,11 @@ jobs:
           node --check app.js
           node --check dashboard-metrics.js
           node --check finance-logic.js
+          node --check firebase-config.js
           node --check portfolio.js
           node --check sw.js
       - name: Run financial logic tests
-        run: node --test tests/finance-logic.test.mjs
+        run: node --test tests/*.test.mjs
 
   deploy:
     if: github.event_name != 'pull_request'
