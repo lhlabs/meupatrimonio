@@ -111,10 +111,11 @@ test('Autenticação foi redirecionada para Supabase Auth', () => {
 });
 
 test('CRUD legado resolve somente para tabelas Supabase conhecidas', () => {
-  assert.match(firestoreCompat, /\['transactions','positions','monthlyGoals','recurring','scheduled'\]/);
+  assert.match(firestoreCompat, /\['transactions','positions','monthlyGoals','recurring','scheduled','wallets','cards'\]/);
   assert.match(firestoreCompat, /supabase\.from\(ref\.table\)/);
   assert.match(firestoreCompat, /\.eq\('user_id', ref\.userId\)/);
   assert.match(firestoreCompat, /Coleção não suportada/);
+  assert.doesNotMatch(firestoreCompat, /tableName\(name\)[\s\S]{0,180}return name;[\s\S]{0,120}supabase\.from\(name\)/);
 });
 
 test('Exclusão de conta combina gateway JWT, validação do usuário e origem restrita', () => {
