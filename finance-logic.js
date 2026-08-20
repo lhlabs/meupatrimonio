@@ -32,15 +32,15 @@ export function addYear(dateStr) {
 }
 
 export function isContribution(item) {
-  if (!item || item.type !== 'expense') return false;
-  const category = norm(item.category);
-  return category.includes('aporte') || category.includes('investimento');
+  return !!item
+    && item.type === 'expense'
+    && norm(item.category) === norm(CONTRIBUTION_CATEGORY);
 }
 
 export function isWithdrawal(item) {
-  if (!item || item.type !== 'income') return false;
-  const category = norm(item.category);
-  return category.includes('resgate de patrimonio') || category.includes('resgate patrimonio');
+  return !!item
+    && item.type === 'income'
+    && norm(item.category) === norm(WITHDRAWAL_CATEGORY);
 }
 
 export function isVariableConsumption(item) {
@@ -245,13 +245,17 @@ export function reserveMetrics({ reserve, transactions, recurring, referenceDate
   void referenceDate;
   const recurringBase = activeRecurringExpenseTotal(recurring, todayYmd);
   const history = completedConsumptionHistory(transactions, todayYmd, 6);
-  const monthlyBase = recurringBase;
+  // Só usa o histórico após três meses completos para evitar distorção por amostra curta.
+  // A base nunca fica abaixo dos compromissos recorrentes atuais e passa a capturar
+  // gastos reais relevantes que não tenham sido cadastrados como recorrentes.
+  const historicalBase = history.months >= 3 ? history.average : 0;
+  const monthlyBase = Math.max(recurringBase, historicalBase);
   const months = monthlyBase > 0 ? safeNumber(reserve) / monthlyBase : null;
   const target = monthlyBase > 0 ? monthlyBase * Math.max(1, safeNumber(targetMonths) || 6) : null;
   const progress = target ? clamp(safeNumber(reserve) / target, 0, 1) : null;
   return {
     recurringBase,
-    historicalBase: 0,
+    historicalBase,
     observedHistoricalBase: history.average,
     historyMonths: history.months,
     monthlyBase,
@@ -285,9 +289,12 @@ export function scoreMetrics({ contribution, contributionGoal, spending, spendin
   ];
   if (reserveProgress != null) measures.push({ score: clamp(reserveProgress, 0, 1), weight: 25 });
   const totalWeight = measures.reduce((sum, item) => sum + item.weight, 0);
-  let score = Math.round(measures.reduce((sum, item) => sum + item.score * item.weight, 0));
-  if (spendingValue > spendingLimit * 1.5) score = Math.min(score, 49);
-  else if (spendingValue > spendingLimit) score = Math.min(score, 69);
+  const weightedScore = measures.reduce((sum, item) => sum + item.score * item.weight, 0);
+  // O score visual é sempre uma escala 0–100. A completude informa quantos pesos
+  // estão efetivamente disponíveis, sem punir o usuário por uma métrica ainda não calculável.
+  let score = totalWeight > 0 ? Math.round(weightedScore / totalWeight * 100) : null;
+  if (spendingValue > spendingLimit * 1.5) score = Math.min(score ?? 0, 49);
+  else if (spendingValue > spendingLimit) score = Math.min(score ?? 0, 69);
   return {
     score,
     completeness: totalWeight,
