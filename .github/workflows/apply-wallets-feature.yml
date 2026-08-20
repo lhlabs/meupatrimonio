@@ -3,12 +3,16 @@ name: Apply wallets feature patch
 on:
   push:
     branches: [feature/wallets-cards-debts]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   apply:
+    if: ${{ !contains(github.event.head_commit.message || '', '[wallet-patch-applied]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -20,7 +24,7 @@ jobs:
         run: node tools/apply-wallets-feature.mjs
       - name: Remove one-off patch machinery and commit result
         run: |
-          rm -f tools/apply-wallets-feature.mjs .github/workflows/apply-wallets-feature.yml
+          rm -f tools/apply-wallets-feature.mjs .github/workflows/apply-wallets-feature.yml .wallet-feature-trigger
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
