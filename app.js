@@ -415,9 +415,12 @@ function syncTransactionRouting() {
   $('#transactionCardLabel')?.classList.toggle('hidden', !cardMode);
   $('#transactionInstallmentsLabel')?.classList.toggle('hidden', !cardMode);
   const recurring = $('#transactionRecurring');
+  const recurringLabel = recurring?.closest('label');
   if (recurring) {
+    const editing = !!$('#transactionEditId')?.value;
     if (cardMode) recurring.checked = false;
-    recurring.disabled = !!$('#transactionEditId')?.value || cardMode;
+    recurring.disabled = editing || cardMode;
+    if (recurringLabel) recurringLabel.style.display = editing || cardMode ? 'none' : '';
   }
   const dateLabel = $('#transactionDate')?.closest('label');
   if (dateLabel?.childNodes[0]) dateLabel.childNodes[0].textContent = cardMode ? 'Data da compra' : 'Data';
@@ -682,6 +685,42 @@ async function repairLegacyRecurringStartDates() {
   return changed;
 }
 
+async function repairAutomationRoutingMetadata() {
+  const recurringById = new Map(recurringCache.map(item => [item.id, item]));
+  const scheduledById = new Map(scheduledCache.map(item => [item.id, item]));
+  let changed = false;
+
+  for (const tx of txCache) {
+    const source = tx.sourceType === 'recurring'
+      ? recurringById.get(tx.sourceId)
+      : tx.sourceType === 'scheduled'
+        ? scheduledById.get(tx.sourceId)
+        : null;
+    if (!source) continue;
+
+    const patch = {};
+    const assignMissing = (key, value) => {
+      if ((tx[key] == null || tx[key] === '') && value != null && value !== '') patch[key] = value;
+    };
+
+    assignMissing('walletId', source.walletId || null);
+    if (tx.sourceType === 'scheduled') {
+      assignMissing('cardId', source.cardId || null);
+      assignMissing('purchaseDate', source.purchaseDate || null);
+      assignMissing('installmentGroupId', source.installmentGroupId || null);
+      assignMissing('installmentNumber', source.installmentNumber ?? null);
+      assignMissing('installmentTotal', source.installmentTotal ?? null);
+    }
+
+    if (Object.keys(patch).length) {
+      await updateDoc(userDoc('transactions', tx.id), patch);
+      changed = true;
+    }
+  }
+
+  return changed;
+}
+
 async function processAutomations() {
   const today = ymd(new Date());
   const existingIds = new Set(txCache.map(item => item.id));
@@ -710,6 +749,8 @@ async function processAutomations() {
           recurring: true,
           sourceType: 'recurring',
           sourceId: recurring.id,
+          walletId: recurring.walletId || null,
+          cardId: null,
           createdAt: serverTimestamp()
         });
         existingIds.add(id);
@@ -733,6 +774,12 @@ async function processAutomations() {
           recurring: false,
           sourceType: 'scheduled',
           sourceId: scheduled.id,
+          walletId: scheduled.walletId || null,
+          cardId: scheduled.cardId || null,
+          purchaseDate: scheduled.purchaseDate || null,
+          installmentGroupId: scheduled.installmentGroupId || null,
+          installmentNumber: scheduled.installmentNumber ?? null,
+          installmentTotal: scheduled.installmentTotal ?? null,
           createdAt: serverTimestamp()
         });
         existingIds.add(id);
@@ -790,6 +837,8 @@ async function loadAll() {
       loadCollection('recurring','createdAt','desc'),
       loadCollection('scheduled','dueDate','asc')
     ]);
+    const routingRepaired = await repairAutomationRoutingMetadata();
+    if (routingRepaired) txCache = await loadCollection('transactions','date','desc');
   }
 
   renderAll();
@@ -1081,7 +1130,7 @@ function renderUpcoming() {
       let guard = 0;
       while (due && due < today && guard++ < 50) due = addYear(due);
     }
-    if (due && due >= today && due <= end) rows.push({ date: due, name: item.name, amount: item.amount, icon:'📅' });
+    if (due && due >= today && due <= end) rows.push({ date: due, name: item.name, amount: item.amount, icon:item.installmentGroupId ? '💳' : '📅' });
   });
   recurringCache.filter(item => item.active).forEach(item => {
     const due = nextRecurringDue(item, now);

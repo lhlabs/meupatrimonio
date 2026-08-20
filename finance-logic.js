@@ -82,7 +82,7 @@ export function cardInstallmentSchedule({ amount, installments, purchaseDate, cl
   const amounts = splitInstallmentAmounts(amount, installments);
   if (!amounts.length) return [];
   const closingDate = dueDateFor(year, month - 1, close);
-  const statementMonth = new Date(year, month - 1 + (String(purchaseDate) > closingDate ? 1 : 0), 1, 12);
+  const statementMonth = new Date(year, month - 1 + (String(purchaseDate) >= closingDate ? 1 : 0), 1, 12);
   const firstDueMonth = new Date(statementMonth);
   if (due <= close) firstDueMonth.setMonth(firstDueMonth.getMonth() + 1);
   return amounts.map((installmentAmount, index) => {
@@ -116,7 +116,7 @@ export function cardDebtMetrics(cards = [], transactions = [], scheduled = [], t
   void transactions;
   const byCard = cards.map(card => {
     const pending = scheduled
-      .filter(item => item?.status === 'active' && item.cardId === card.id)
+      .filter(item => item?.cardId === card.id && (item.status == null || item.status === 'active'))
       .filter(item => !item.purchaseDate || !throughDate || String(item.purchaseDate) <= throughDate)
       .sort((a, b) => String(a.dueDate || '').localeCompare(String(b.dueDate || '')));
     const open = pending.reduce((sum, item) => sum + safeNumber(item.amount), 0);
