@@ -2,6 +2,8 @@
 node_modules/
 coverage/
 .firebase/
+.supabase/
+supabase/.temp/
 *.log
 .DS_Store
 
@@ -21,5 +23,12 @@ service-account*.json
 service_account*.json
 *-firebase-adminsdk-*.json
 firebase-adminsdk*.json
+firebase-service.json
+supabase-service.json
 credentials*.json
 secrets*.json
+
+# Exportações temporárias de migração
+firebase-users*.json
+firestore-export*/
+migration-export*/

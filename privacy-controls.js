@@ -5,15 +5,7 @@ import {
   reauthenticateWithCredential,
   deleteUser
 } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-auth.js";
-import {
-  getFirestore,
-  collection,
-  doc,
-  getDocs,
-  writeBatch
-} from "https://www.gstatic.com/firebasejs/12.17.0/firebase-firestore.js";
 
-const USER_COLLECTIONS = ['monthlyGoals', 'transactions', 'positions', 'recurring', 'scheduled'];
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function resolveApp() {
@@ -21,34 +13,7 @@ async function resolveApp() {
     if (getApps().length) return getApp();
     await sleep(50);
   }
-  throw new Error('Firebase indisponível para os controles de privacidade.');
-}
-
-async function deleteSnapshotInChunks(db, snapshot) {
-  const docs = snapshot.docs.slice();
-  while (docs.length) {
-    const batch = writeBatch(db);
-    docs.splice(0, 400).forEach(item => batch.delete(item.ref));
-    await batch.commit();
-  }
-}
-
-async function deleteFirestoreUserData(db, uid) {
-  // Fail closed: as regras antigas bloqueiam a exclusão de config/planning.
-  // Assim, enquanto as novas regras não estiverem publicadas, o fluxo para
-  // aqui antes de remover lançamentos ou patrimônio parcialmente.
-  const planningBatch = writeBatch(db);
-  planningBatch.delete(doc(db, 'users', uid, 'config', 'planning'));
-  await planningBatch.commit();
-
-  for (const name of USER_COLLECTIONS) {
-    const snapshot = await getDocs(collection(db, 'users', uid, name));
-    await deleteSnapshotInChunks(db, snapshot);
-  }
-
-  const rootBatch = writeBatch(db);
-  rootBatch.delete(doc(db, 'users', uid));
-  await rootBatch.commit();
+  throw new Error('Autenticação indisponível para os controles de privacidade.');
 }
 
 function injectPrivacyPanel(deleteHandler) {
@@ -63,7 +28,7 @@ function injectPrivacyPanel(deleteHandler) {
     <span class="card-kicker">PRIVACIDADE & SEGURANÇA</span>
     <h2>Controle dos seus dados</h2>
     <p class="muted">Seus dados financeiros ficam vinculados ao identificador da sua conta. Você pode exportar os registros em Excel a qualquer momento.</p>
-    <p class="muted">A exclusão abaixo remove os dados conhecidos do Meu Patrimônio no Firestore e, em seguida, exclui a conta de autenticação.</p>
+    <p class="muted">A exclusão abaixo remove sua conta e os dados financeiros vinculados a ela no Supabase.</p>
     <button id="deleteMyAccountBtn" type="button" class="ghost-btn">Excluir minha conta e dados</button>
     <div id="privacyStatus" class="muted" role="status" aria-live="polite" style="margin-top:10px"></div>`;
   planning.appendChild(panel);
@@ -80,7 +45,6 @@ function setStatus(message, isError = false) {
 try {
   const app = await resolveApp();
   const auth = getAuth(app);
-  const db = getFirestore(app);
 
   const handleDelete = async event => {
     const button = event.currentTarget;
@@ -98,7 +62,6 @@ try {
     try {
       const credential = EmailAuthProvider.credential(current.email, password);
       await reauthenticateWithCredential(current, credential);
-      await deleteFirestoreUserData(db, current.uid);
       await deleteUser(current);
       window.alert('Conta e dados excluídos com sucesso.');
       window.location.reload();
@@ -106,13 +69,11 @@ try {
       console.error('Falha na exclusão da conta.', error);
       const code = String(error?.code || '');
       if (code.includes('invalid-credential') || code.includes('wrong-password')) {
-        setStatus('Senha incorreta. Nenhum dado foi excluído antes da validação da identidade.', true);
+        setStatus('Senha incorreta. Nenhum dado foi excluído.', true);
       } else if (code.includes('requires-recent-login')) {
         setStatus('Sua sessão precisa ser renovada. Saia, entre novamente e repita a exclusão.', true);
-      } else if (code.includes('permission-denied')) {
-        setStatus('A exclusão integral ainda não está liberada pelas regras publicadas no Firebase. Nenhum lançamento ou patrimônio foi removido por este fluxo.', true);
       } else {
-        setStatus('Não foi possível concluir a exclusão integral. A conta foi mantida para evitar remover o acesso antes dos dados.', true);
+        setStatus('Não foi possível concluir a exclusão integral. A conta e os dados foram mantidos.', true);
       }
     } finally {
       button.disabled = false;

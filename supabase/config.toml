@@ -1,0 +1,5 @@
+[functions.delete-account]
+# Com publishable keys (sb_publishable_), a função valida explicitamente o JWT
+# de sessão do usuário via auth.getUser(token). A verificação legada do gateway
+# deve permanecer desativada para não rejeitar o novo modelo de chaves.
+verify_jwt = false

@@ -2,59 +2,61 @@
 
 ## Modelo de segurança
 
-O aplicativo é um cliente web/PWA estático. A segurança dos dados privados não depende do JavaScript entregue ao navegador: ela deve ser aplicada por Firebase Authentication, App Check e Firestore Security Rules.
+O Meu Patrimônio é um cliente web/PWA estático hospedado no GitHub Pages. A proteção dos dados privados não depende do JavaScript entregue ao navegador: a autorização efetiva é aplicada por Supabase Auth, PostgreSQL e Row Level Security (RLS).
 
-- Dados privados ficam em `users/{uid}/...`.
-- As regras devem validar `request.auth.uid == userId`.
-- Caminhos não explicitamente autorizados são negados.
-- A configuração pública do Firebase Web SDK e a site key do App Check não são credenciais administrativas.
-- Chaves privadas, service accounts, tokens administrativos, arquivos `.env` e credenciais reais nunca devem ser commitados.
+- Cada tabela financeira possui `user_id` referenciando `auth.users(id)` com `ON DELETE CASCADE`.
+- Todas as tabelas financeiras expostas têm RLS habilitado e forçado.
+- As políticas exigem `(select auth.uid()) = user_id` em `USING` e `WITH CHECK`.
+- O papel `anon` não recebe CRUD nas tabelas financeiras.
+- O papel `authenticated` recebe somente `SELECT`, `INSERT`, `UPDATE` e `DELETE`; RLS limita as linhas ao próprio usuário.
+- O frontend usa apenas a URL pública do projeto e uma publishable key `sb_publishable_...`.
+- Secret keys `sb_secret_...`, service-role keys, credenciais administrativas e arquivos `.env` nunca podem ser enviados ao navegador ou commitados.
 
-## Controles implementados no código
+## Controles implementados
 
-- isolamento por UID no Firestore;
-- validação de esquema, tipo, tamanho e faixa de valores nas Security Rules;
-- timestamps de criação protegidos contra alteração;
-- `updatedAt` validado no servidor quando aplicável;
-- deny-by-default para caminhos desconhecidos;
-- Firebase App Check inicializado com reCAPTCHA Enterprise;
-- sessão reduzida para persistência de sessão do navegador/PWA;
-- bloqueio por 15 minutos de inatividade;
-- senha de cadastro reforçada no cliente para 12+ caracteres com maiúscula, minúscula, número e símbolo;
-- exclusão autenticada dos dados conhecidos e da conta;
-- cache PWA restrito a arquivos estáticos do aplicativo;
-- pipeline GitHub Actions com menor privilégio e credenciais de checkout não persistidas;
-- `.gitignore` para reduzir risco de commit acidental de segredos.
+- isolamento por usuário no PostgreSQL via RLS;
+- validações de tipos, categorias, tamanhos, datas e faixas monetárias no banco;
+- IDs e contratos de dados compatíveis com a lógica atual do aplicativo;
+- timestamps de criação e atualização controlados pelo PostgreSQL para operações do PWA;
+- preservação de `createdAt` em atualizações;
+- cliente web completo com sessão limitada à sessão do navegador;
+- PWA mobile com sessão persistente no dispositivo para manter a experiência de aplicativo instalado;
+- encerramento da sessão após 15 minutos de inatividade enquanto o aplicativo está em uso;
+- senha de cadastro reforçada na interface para 12+ caracteres com maiúscula, minúscula, número e símbolo;
+- confirmação de e-mail e recuperação de senha pelo Supabase Auth;
+- exclusão da própria conta por Edge Function: a interface exige nova autenticação por senha e a função valida o JWT do usuário antes de executar a exclusão administrativa;
+- exclusão da conta propagada às tabelas financeiras por `ON DELETE CASCADE`;
+- endpoint temporário usado durante os testes de migração de usuários do Firebase aposentado e neutralizado;
+- PWA e atalhos mobile preservados;
+- GitHub Actions com permissões explícitas, testes automatizados e checkout sem persistência de credenciais;
+- `.gitignore` cobrindo credenciais, chaves e exportações temporárias.
 
-## Configurações obrigatórias fora do repositório
+## Edge Function `delete-account`
 
-Estas proteções não podem ser garantidas apenas pelo GitHub e precisam ser conferidas no Firebase/Google Cloud:
+O projeto utiliza publishable/secret API keys do modelo atual do Supabase. A função `delete-account` mantém `verify_jwt = false` no gateway e faz a autenticação explicitamente no corpo da função com `auth.getUser(token)`, antes de utilizar a secret key disponível apenas no ambiente da Edge Function. Essa configuração é intencional para o modelo de novas API keys e não torna o endpoint público para operações administrativas: sem um JWT de sessão válido, a exclusão é rejeitada.
 
-1. Publicar a versão atual de `firestore.rules` no projeto correto.
-2. Habilitar enforcement do App Check para Cloud Firestore somente após validar métricas de requisições legítimas.
-3. Configurar Password Policy do Firebase Authentication em modo **Enforce**, preferencialmente alinhada à regra do cliente (12+ caracteres e composição forte).
-4. Habilitar proteção contra enumeração de e-mail no Firebase Authentication/Identity Platform quando disponível para o projeto.
-5. Manter somente os domínios realmente utilizados em Authentication > Authorized domains.
-6. Revisar periodicamente usuários, chaves, APIs habilitadas, alertas de uso e faturamento/quota.
+Nunca permita que o cliente forneça livremente o UUID a ser excluído. A identidade removida deve vir exclusivamente do JWT validado pelo servidor.
 
-## Compatibilidade de contas antigas
+## Estado da migração
 
-As regras mantêm temporariamente uma exceção para contas antigas que já possuíam `users/{uid}` antes da exigência de verificação de e-mail. Mesmo nessa exceção, o UID deve ser o proprietário e o e-mail do perfil precisa coincidir com o token autenticado.
+Não há requisito de preservar usuários ou dados existentes do Firebase. O Supabase é tratado como a nova fonte de verdade. Arquivos de configuração e regras de implantação do Firebase foram removidos da branch de migração; o nome `firebase-config.js` e os imports históricos permanecem somente como uma camada de compatibilidade interna para evitar alterar a lógica e o fluxo da interface durante a troca de infraestrutura. O import map redireciona esses módulos para implementações baseadas em Supabase, portanto o Firebase SDK não é carregado em produção.
 
-Depois que todas as contas antigas estiverem com e-mail confirmado, remova `legacyRootMatches()` e faça `canUsePrivateData()` exigir somente `owns(userId) && emailVerified()`.
+## Configurações de produção
 
-## Exclusão e privacidade
-
-A interface de Planejamento inclui exclusão da conta. Antes de remover dados, o usuário precisa informar novamente a senha. O fluxo remove as coleções conhecidas do usuário, o documento de planejamento, o perfil-raiz e por último a conta do Firebase Authentication.
-
-Se novas coleções privadas forem adicionadas no futuro, elas também devem ser incluídas no fluxo de exclusão em `privacy-controls.js`.
+- manter confirmação de e-mail habilitada no Supabase Auth;
+- configurar Site URL e Redirect URLs somente para endereços legítimos do Meu Patrimônio;
+- manter política forte de senha no Auth alinhada à interface;
+- usar somente a publishable key no frontend;
+- revisar periodicamente Auth Logs, Edge Function Logs, Security Advisors, quotas e faturamento;
+- habilitar Leaked Password Protection no Supabase Auth quando disponível no plano/configuração da conta.
 
 ## Resposta a incidente
 
 Se uma credencial administrativa real for exposta:
 
-1. revogar/rotacionar imediatamente a credencial no provedor;
-2. remover a credencial do código atual;
-3. tratar o histórico Git como comprometido até a limpeza/rotação;
-4. revisar logs e atividade do projeto;
-5. avaliar impacto sobre titulares e obrigações de comunicação aplicáveis.
+1. revogar ou rotacionar imediatamente a credencial no provedor;
+2. remover a credencial do código e de qualquer artefato publicado;
+3. considerar o histórico Git comprometido até concluir a rotação e a limpeza apropriadas;
+4. revisar logs de autenticação, banco e funções;
+5. avaliar eventual leitura ou alteração indevida de dados;
+6. avaliar impacto sobre titulares e obrigações de comunicação aplicáveis.

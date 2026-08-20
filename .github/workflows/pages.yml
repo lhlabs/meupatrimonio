@@ -37,11 +37,18 @@ jobs:
           node --check dashboard-metrics.js
           node --check finance-logic.js
           node --check firebase-config.js
+          node --check supabase-config.js
+          node --check supabase-client.js
+          node --check compat/firebase-app.js
+          node --check compat/firebase-auth.js
+          node --check compat/firebase-firestore.js
+          node --check compat/firebase-app-check.js
           node --check portfolio.js
           node --check sw.js
           node --check mobile/mobile.js
           node --check mobile/sw.js
-      - name: Run financial logic tests
+          node --check tools/firebase-to-supabase/migrate-firestore-data.mjs
+      - name: Run financial and security tests
         run: node --test tests/*.test.mjs
 
   deploy:

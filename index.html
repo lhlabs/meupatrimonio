@@ -9,6 +9,16 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="styles.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "https://www.gstatic.com/firebasejs/12.17.0/firebase-app.js": "./compat/firebase-app.js",
+      "https://www.gstatic.com/firebasejs/12.17.0/firebase-auth.js": "./compat/firebase-auth.js",
+      "https://www.gstatic.com/firebasejs/12.17.0/firebase-firestore.js": "./compat/firebase-firestore.js",
+      "https://www.gstatic.com/firebasejs/12.17.0/firebase-app-check.js": "./compat/firebase-app-check.js"
+    }
+  }
+  </script>
   <title>Meu Patrimônio</title>
 </head>
 <body>
@@ -19,7 +29,7 @@
       <p class="muted auth-copy">Patrimônio, orçamento, metas e agenda financeira em um único cockpit.</p>
       <form id="loginForm" autocomplete="on"><label>E-mail<input id="email" type="email" autocomplete="username" required /></label><label>Senha<input id="password" type="password" autocomplete="current-password" required /></label><button type="submit" class="primary">Entrar no cockpit</button></form>
       <button id="resetPasswordBtn" class="link-button" type="button">Esqueci minha senha</button>
-      <div class="security-pill">🔒 Firebase Auth + dados isolados por usuário</div>
+      <div class="security-pill">🔒 Supabase Auth + dados isolados por usuário</div>
     </div>
   </section>
 

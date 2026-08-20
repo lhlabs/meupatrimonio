@@ -6,7 +6,6 @@ import {
   sendEmailVerification,
   signOut
 } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-auth.js";
-import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-firestore.js";
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -16,29 +15,27 @@ async function resolveApp() {
     await sleep(50);
   }
   const config = globalThis.__MP_FIREBASE_CONFIG__;
-  if (!config) throw new Error('Configuração do Firebase indisponível.');
+  if (!config) throw new Error('Configuração de autenticação indisponível.');
   return initializeApp(config);
 }
 
 function authMessage(error) {
   const code = String(error?.code || '');
-  if (code.includes('email-already-in-use')) return 'Já existe uma conta com este e-mail. Entre normalmente ou reenvie a confirmação.';
+  if (code.includes('email-already-in-use')) return 'Não foi possível criar a conta com estes dados. Se você já possui cadastro, tente entrar ou redefinir a senha.';
   if (code.includes('invalid-email')) return 'Informe um e-mail válido.';
-  if (code.includes('weak-password')) return 'Use uma senha mais forte, com pelo menos 8 caracteres.';
+  if (code.includes('weak-password')) return 'Use uma senha mais forte.';
   if (code.includes('too-many-requests')) return 'Muitas tentativas. Aguarde alguns minutos e tente novamente.';
-  if (code.includes('operation-not-allowed')) return 'O cadastro por e-mail e senha ainda não está habilitado no Firebase.';
+  if (code.includes('email-not-verified')) return 'Confirme seu e-mail antes de entrar. Verifique também Spam, Lixo eletrônico e Promoções.';
   if (code.includes('invalid-credential') || code.includes('wrong-password') || code.includes('user-not-found')) return 'E-mail ou senha inválidos.';
   if (code.includes('network-request-failed')) return 'Falha de conexão. Verifique sua internet e tente novamente.';
-  if (code.includes('unauthorized-domain')) return 'Este endereço do aplicativo não está autorizado no Firebase Authentication.';
   return `Não foi possível concluir a autenticação${code ? ` (${code})` : ''}.`;
 }
 
 function verificationMessage(error) {
   const code = String(error?.code || '');
-  if (code.includes('too-many-requests')) return 'O Firebase bloqueou novos envios temporariamente por excesso de tentativas. Aguarde alguns minutos e tente novamente.';
+  if (code.includes('too-many-requests')) return 'O serviço bloqueou novos envios temporariamente por excesso de tentativas. Aguarde alguns minutos e tente novamente.';
   if (code.includes('network-request-failed')) return 'Não foi possível solicitar o e-mail de confirmação por falha de conexão.';
-  if (code.includes('unauthorized-continue-uri') || code.includes('unauthorized-domain')) return 'O domínio do aplicativo precisa ser autorizado no Firebase Authentication antes do envio.';
-  return `A conta existe, mas o Firebase não confirmou o envio do e-mail${code ? ` (${code})` : ''}.`;
+  return 'Não foi possível solicitar o e-mail de confirmação agora. Tente novamente em alguns minutos.';
 }
 
 function setVisible(element, visible) {
@@ -68,12 +65,12 @@ function injectRegistrationUi() {
     <div style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,.08)">
       <div class="eyebrow">NOVA CONTA</div>
       <h2 style="margin:4px 0 6px;font-size:1.2rem">Crie seu acesso</h2>
-      <p class="muted" style="margin:0 0 12px">Cada conta possui um identificador exclusivo. Seus dados financeiros ficam separados dos demais usuários no Firestore.</p>
+      <p class="muted" style="margin:0 0 12px">Cada conta possui um identificador exclusivo. Seus dados financeiros ficam separados dos demais usuários por autenticação e regras RLS.</p>
       <form id="registerForm" autocomplete="on">
         <label>E-mail<input id="registerEmail" type="email" autocomplete="email" maxlength="254" required /></label>
-        <label>Senha<input id="registerPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required /></label>
-        <label>Confirmar senha<input id="registerPasswordConfirm" type="password" autocomplete="new-password" minlength="8" maxlength="128" required /></label>
-        <small class="muted" style="display:block;margin:-4px 0 12px">Use no mínimo 8 caracteres e não reutilize senhas de outros serviços.</small>
+        <label>Senha<input id="registerPassword" type="password" autocomplete="new-password" minlength="12" maxlength="128" required /></label>
+        <label>Confirmar senha<input id="registerPasswordConfirm" type="password" autocomplete="new-password" minlength="12" maxlength="128" required /></label>
+        <small class="muted" style="display:block;margin:-4px 0 12px">Use 12 ou mais caracteres, com maiúscula, minúscula, número e símbolo. Não reutilize senhas.</small>
         <button type="submit" class="primary">Criar conta</button>
       </form>
       <div id="registerStatus" class="muted" role="status" aria-live="polite" style="margin-top:12px"></div>
@@ -110,33 +107,17 @@ function injectRegistrationUi() {
 
   openButton.addEventListener('click', showRegister);
   panel.querySelector('#backToLoginBtn').addEventListener('click', showLogin);
-  return { panel, loginForm, resetButton, openButton, resendButton, setStatus, showResend, showLogin, showRegister };
+  return { panel, resendButton, setStatus, showResend, showLogin, showRegister };
 }
 
-async function sendVerification(auth, targetUser) {
-  auth.languageCode = 'pt-BR';
-  await sendEmailVerification(targetUser);
-}
-
-function suppressUnverifiedLoadToast(auth) {
-  const toast = document.querySelector('#toast');
-  if (!toast) return;
-  const observer = new MutationObserver(() => {
-    const current = auth.currentUser;
-    if (current && !current.emailVerified && toast.textContent.includes('Falha ao carregar')) {
-      toast.classList.remove('show');
-      toast.textContent = '';
-    }
-  });
-  observer.observe(toast, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+async function requestVerification(email) {
+  await sendEmailVerification({ email });
 }
 
 try {
   const app = await resolveApp();
   const auth = getAuth(app);
-  const db = getFirestore(app);
   const ui = injectRegistrationUi();
-  suppressUnverifiedLoadToast(auth);
 
   if (ui) {
     const loginForm = document.querySelector('#loginForm');
@@ -150,35 +131,23 @@ try {
       if (button) button.disabled = true;
 
       try {
-        const credential = await signInWithEmailAndPassword(auth, email, password);
-
-        if (!credential.user.emailVerified) {
-          const root = await getDoc(doc(db, 'users', credential.user.uid));
-          if (!root.exists()) {
-            ui.showRegister();
-            const registerEmail = ui.panel.querySelector('#registerEmail');
-            if (registerEmail) registerEmail.value = email;
-            ui.showResend(true);
-
-            try {
-              await sendVerification(auth, credential.user);
-              ui.setStatus('E-mail de confirmação solicitado ao Firebase com sucesso. Verifique também Spam, Lixo eletrônico e Promoções.');
-            } catch (verificationError) {
-              console.error('Falha ao enviar verificação.', verificationError);
-              ui.setStatus(verificationMessage(verificationError), true);
-            } finally {
-              await signOut(auth).catch(() => {});
-            }
-            return;
-          }
-        }
+        await signInWithEmailAndPassword(auth, email, password);
       } catch (error) {
         console.error('Falha de autenticação.', error);
-        const toast = document.querySelector('#toast');
-        if (toast) {
-          toast.textContent = authMessage(error);
-          toast.classList.add('show');
-          setTimeout(() => toast.classList.remove('show'), 3200);
+        const code = String(error?.code || '');
+        if (code.includes('email-not-verified')) {
+          ui.showRegister();
+          const registerEmail = ui.panel.querySelector('#registerEmail');
+          if (registerEmail) registerEmail.value = email;
+          ui.showResend(true);
+          ui.setStatus('Seu cadastro existe, mas o e-mail ainda precisa ser confirmado. Reenvie a confirmação se necessário.');
+        } else {
+          const toast = document.querySelector('#toast');
+          if (toast) {
+            toast.textContent = authMessage(error);
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 3200);
+          }
         }
       } finally {
         if (button) button.disabled = false;
@@ -195,26 +164,17 @@ try {
 
       ui.setStatus('');
       ui.showResend(false);
-      if (password.length < 8) return ui.setStatus('A senha precisa ter pelo menos 8 caracteres.', true);
       if (password !== confirmation) return ui.setStatus('As senhas não coincidem.', true);
       if (button) button.disabled = true;
 
-      let createdUser = null;
       try {
-        const credential = await createUserWithEmailAndPassword(auth, email, password);
-        createdUser = credential.user;
-        await sendVerification(auth, credential.user);
-        ui.setStatus('Conta criada e e-mail de confirmação solicitado ao Firebase. Abra o link recebido e depois entre normalmente. Verifique também Spam, Lixo eletrônico e Promoções.');
+        await createUserWithEmailAndPassword(auth, email, password);
+        ui.setStatus('Conta criada. Enviamos um e-mail de confirmação. Abra o link recebido e depois entre normalmente. Verifique também Spam, Lixo eletrônico e Promoções.');
         ui.showResend(true);
       } catch (error) {
-        console.error('Falha ao criar conta ou enviar verificação.', error);
-        if (createdUser) {
-          ui.setStatus(verificationMessage(error), true);
-          ui.showResend(true);
-        } else {
-          ui.setStatus(authMessage(error), true);
-          if (String(error?.code || '').includes('email-already-in-use')) ui.showResend(true);
-        }
+        console.error('Falha ao criar conta.', error);
+        ui.setStatus(authMessage(error), true);
+        if (String(error?.code || '').includes('email-already-in-use')) ui.showResend(true);
       } finally {
         await signOut(auth).catch(() => {});
         if (button) button.disabled = false;
@@ -224,27 +184,17 @@ try {
     ui.resendButton.addEventListener('click', async event => {
       const button = event.currentTarget;
       const email = ui.panel.querySelector('#registerEmail').value.trim();
-      const password = ui.panel.querySelector('#registerPassword').value;
       if (!email) return ui.setStatus('Informe o e-mail da conta.', true);
-      if (!password) return ui.setStatus('Informe a senha da conta para reenviar a confirmação.', true);
 
       button.disabled = true;
       ui.setStatus('Solicitando novo e-mail de confirmação...');
       try {
-        const credential = await signInWithEmailAndPassword(auth, email, password);
-        if (credential.user.emailVerified) {
-          ui.setStatus('Este e-mail já está confirmado. Volte para entrar normalmente.');
-          ui.showResend(false);
-        } else {
-          await sendVerification(auth, credential.user);
-          ui.setStatus('Novo e-mail de confirmação solicitado ao Firebase com sucesso. Verifique a caixa de entrada, Spam, Lixo eletrônico e Promoções.');
-        }
+        await requestVerification(email);
+        ui.setStatus('Se houver um cadastro pendente para este e-mail, uma nova confirmação foi solicitada. Verifique também Spam, Lixo eletrônico e Promoções.');
       } catch (error) {
         console.error('Falha ao reenviar verificação.', error);
-        const code = String(error?.code || '');
-        ui.setStatus(code.includes('invalid-credential') ? authMessage(error) : verificationMessage(error), true);
+        ui.setStatus(verificationMessage(error), true);
       } finally {
-        await signOut(auth).catch(() => {});
         button.disabled = false;
       }
     });
