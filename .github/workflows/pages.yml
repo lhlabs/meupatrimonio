@@ -81,6 +81,7 @@ jobs:
               "${walletsCache.find(w => w.id === tx.walletId) ? ` · ${esc(walletsCache.find(w => w.id === tx.walletId).name)}` : ''}",
               r"\${walletsCache.find(w => w.id === tx.walletId) ? \` · \${esc(walletsCache.find(w => w.id === tx.walletId).name)}\` : ''}"
           )
+          src = src.replace(r"\\${walletsCache.find", r"\${walletsCache.find")
 
           path.write_text(src)
           PY
