@@ -21,3 +21,18 @@ test('dados antigos de automações recebem reparo de metadados', () => {
 test('recorrência não é exibida junto ao parcelamento do cartão', () => {
   assert.match(appSource, /recurringLabel\.style\.display = editing \|\| cardMode \? 'none' : ''/);
 });
+
+test('virada de data sincroniza o mês e reprocessa automações sem exigir recarga manual', () => {
+  assert.match(appSource, /async function synchronizeDateRollover\(\)/);
+  assert.match(appSource, /window\.addEventListener\('focus', \(\) => void synchronizeDateRollover\(\)\)/);
+  assert.match(appSource, /visibilitychange/);
+  assert.match(appSource, /setInterval\(\(\) => void synchronizeDateRollover\(\), 60_000\)/);
+});
+
+test('recorrências legadas recebem carteira única sem rebaixar movimentos anteriores à criação da carteira', () => {
+  assert.match(appSource, /async function repairRecurringWalletAssignments\(\)/);
+  assert.match(appSource, /activeWallets\.length !== 1/);
+  assert.match(appSource, /dueCanUseWallet\(source, tx\.date\)/);
+  assert.match(appSource, /dueCanUseWallet\(recurring, due\)/);
+  assert.match(appSource, /walletId: tx\.walletId \|\| null/);
+});
