@@ -99,3 +99,12 @@ test('pagamento de parcela reduz caixa e dívida na mesma quantia sem alterar pa
   assert.equal(after.walletAssets,700);
   assert.equal(after.cardDebts,300);
 });
+
+test('fechamento 28 e vencimento 7 atravessam o mês corretamente', () => {
+  const beforeClose = cardInstallmentSchedule({ amount:600, installments:6, purchaseDate:'2026-09-27', closingDay:28, dueDay:7 });
+  const onClose = cardInstallmentSchedule({ amount:600, installments:6, purchaseDate:'2026-09-28', closingDay:28, dueDay:7 });
+  assert.equal(beforeClose[0].date, '2026-10-07');
+  assert.equal(onClose[0].date, '2026-11-07');
+  assert.equal(beforeClose.at(-1).date, '2027-03-07');
+  assert.equal(onClose.at(-1).date, '2027-04-07');
+});

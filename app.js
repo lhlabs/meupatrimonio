@@ -58,6 +58,8 @@ let settings = {};
 let agendaAvailable = true;
 let annualForecast = false;
 let actionBusy = false;
+let observedToday = ymd(new Date());
+let rolloverSyncBusy = false;
 
 function toast(message) {
   const el = $('#toast');
@@ -659,6 +661,8 @@ async function migrateLegacyRecurring() {
       startDate: tx.date,
       endDate: '',
       active: true,
+      walletId: tx.walletId || null,
+      cardId: null,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
@@ -685,6 +689,24 @@ async function repairLegacyRecurringStartDates() {
   return changed;
 }
 
+function dateKeyFromTimestamp(value) {
+  if (!value) return '';
+  if (typeof value === 'string') return value.slice(0, 10);
+  if (typeof value?.toDate === 'function') return ymd(value.toDate());
+  if (Number.isFinite(value?.seconds)) return ymd(new Date(value.seconds * 1000));
+  return '';
+}
+
+function walletTrackingStart(walletId) {
+  return dateKeyFromTimestamp(walletById(walletId)?.createdAt);
+}
+
+function dueCanUseWallet(source, due) {
+  if (!source?.walletId) return true;
+  const trackingStart = walletTrackingStart(source.walletId);
+  return !trackingStart || !due || String(due) >= trackingStart;
+}
+
 async function repairAutomationRoutingMetadata() {
   const recurringById = new Map(recurringCache.map(item => [item.id, item]));
   const scheduledById = new Map(scheduledCache.map(item => [item.id, item]));
@@ -703,7 +725,7 @@ async function repairAutomationRoutingMetadata() {
       if ((tx[key] == null || tx[key] === '') && value != null && value !== '') patch[key] = value;
     };
 
-    assignMissing('walletId', source.walletId || null);
+    if (dueCanUseWallet(source, tx.date)) assignMissing('walletId', source.walletId || null);
     if (tx.sourceType === 'scheduled') {
       assignMissing('cardId', source.cardId || null);
       assignMissing('purchaseDate', source.purchaseDate || null);
@@ -718,6 +740,18 @@ async function repairAutomationRoutingMetadata() {
     }
   }
 
+  return changed;
+}
+
+async function repairRecurringWalletAssignments() {
+  const activeWallets = walletsCache.filter(item => item.active !== false);
+  if (activeWallets.length !== 1) return false;
+  const walletId = activeWallets[0].id;
+  let changed = false;
+  for (const recurring of recurringCache.filter(item => !item.walletId && !item.cardId)) {
+    await updateDoc(userDoc('recurring', recurring.id), { walletId, updatedAt: serverTimestamp() });
+    changed = true;
+  }
   return changed;
 }
 
@@ -738,6 +772,10 @@ async function processAutomations() {
         continue;
       }
       if (!shouldMaterializeRecurring(due, today)) break;
+      if (!dueCanUseWallet(recurring, due)) {
+        cursor.setMonth(cursor.getMonth() + 1);
+        continue;
+      }
       const id = `rec_${recurring.id}_${due.slice(0,7)}`;
       if (!existingIds.has(id)) {
         await setDoc(userDoc('transactions', id), {
@@ -796,6 +834,26 @@ async function processAutomations() {
   }
 }
 
+async function synchronizeDateRollover() {
+  const now = new Date();
+  const today = ymd(now);
+  if (today === observedToday || !user || rolloverSyncBusy) return;
+  const previousDay = observedToday;
+  rolloverSyncBusy = true;
+  observedToday = today;
+  try {
+    if (monthKey(selectedMonth) === previousDay.slice(0, 7)) {
+      selectedMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    }
+    if (selectedYear === Number(previousDay.slice(0, 4))) selectedYear = now.getFullYear();
+    await loadAll();
+  } catch (error) {
+    console.error('Falha ao sincronizar a virada de data.', error);
+  } finally {
+    rolloverSyncBusy = false;
+  }
+}
+
 async function loadAll() {
   await ensureUserRoot();
   const [transactions, positions, planning, monthlyGoals, wallets, cards] = await Promise.all([
@@ -830,7 +888,8 @@ async function loadAll() {
     await migrateLegacyRecurring();
     recurringCache = await loadCollection('recurring','createdAt','desc');
     const repaired = await repairLegacyRecurringStartDates();
-    if (repaired) recurringCache = await loadCollection('recurring','createdAt','desc');
+    const walletAssignmentsRepaired = await repairRecurringWalletAssignments();
+    if (repaired || walletAssignmentsRepaired) recurringCache = await loadCollection('recurring','createdAt','desc');
     await processAutomations();
     [txCache, recurringCache, scheduledCache] = await Promise.all([
       loadCollection('transactions','date','desc'),
@@ -1594,6 +1653,9 @@ $('#exportExcelBtn').addEventListener('click', exportExcel);
 $('#exportExcelAnnualBtn').addEventListener('click', exportExcel);
 
 prepareUi();
+window.addEventListener('focus', () => void synchronizeDateRollover());
+document.addEventListener('visibilitychange', () => { if (!document.hidden) void synchronizeDateRollover(); });
+setInterval(() => void synchronizeDateRollover(), 60_000);
 onAuthStateChanged(auth, async current => {
   user = current;
   if (current) {
