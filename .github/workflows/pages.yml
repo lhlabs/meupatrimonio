@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: pages-${{ github.ref }}
@@ -22,193 +22,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: fix/project-card-expenses-monthly
-          fetch-depth: 0
-          persist-credentials: true
+          persist-credentials: false
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '24'
           package-manager-cache: false
-      - name: Apply projected card expense fix
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          def replace_once(path, old, new, label):
-              p = Path(path)
-              s = p.read_text()
-              count = s.count(old)
-              if count != 1:
-                  raise SystemExit(f'{label}: expected 1 match, found {count}')
-              p.write_text(s.replace(old, new, 1))
-
-          finance = Path('finance-logic.js')
-          s = finance.read_text()
-          marker = "export function effectiveMonthRows(transactions = [], recurring = [], date, now = new Date()) {\n"
-          if s.count(marker) != 1:
-              raise SystemExit('finance helper insertion marker mismatch')
-          helper = """export function projectedCardInstallmentRows(transactions = [], scheduled = [], date) {
-  const key = monthKey(date);
-  return scheduled
-    .filter(item => item && (item.status == null || item.status === 'active'))
-    .filter(item => item.cardId && item.installmentGroupId && String(item.dueDate || '').startsWith(key))
-    .filter(item => safeNumber(item.amount) > 0)
-    .filter(item => !transactions.some(tx => tx?.sourceType === 'scheduled' && tx?.sourceId === item.id))
-    .map(item => ({
-      id: `projected_card_${item.id}_${key}`,
-      type: 'expense',
-      amount: safeNumber(item.amount),
-      category: item.category,
-      description: item.description || item.name || 'Parcela do cartão',
-      date: item.dueDate,
-      sourceType: 'scheduled',
-      sourceId: item.id,
-      projected: true,
-      walletId: item.walletId || null,
-      cardId: item.cardId || null,
-      purchaseDate: item.purchaseDate || null,
-      installmentGroupId: item.installmentGroupId || null,
-      installmentNumber: item.installmentNumber ?? null,
-      installmentTotal: item.installmentTotal ?? null
-    }));
-}
-
-"""
-          finance.write_text(s.replace(marker, helper + marker, 1))
-
-          replace_once(
-              'app.js',
-              "  nextRecurringDue, periodSpendingMetrics, positionMetrics, projectFutureValue,\n",
-              "  nextRecurringDue, periodSpendingMetrics, positionMetrics, projectedCardInstallmentRows, projectFutureValue,\n",
-              'app import'
-          )
-          replace_once(
-              'app.js',
-              "function installmentPlansForMonth(date) { return plannedForMonth(date).filter(item => item.installmentGroupId); }\n",
-              "function installmentPlansForMonth(date) { return projectedCardInstallmentRows(txCache, scheduledCache, date); }\n",
-              'app card projection source'
-          )
-          replace_once(
-              'app.js',
-              "function renderDashboard() {\n  const metrics = metricsForMonth(selectedMonth);\n  const positions = calcPositions();\n",
-              "function renderDashboard() {\n  const metrics = metricsForMonth(selectedMonth);\n  const projectedRows = metrics.rows.filter(item => item.projected === true);\n  const projectedCardExpenses = projectedRows\n    .filter(item => item.sourceType === 'scheduled' && item.installmentGroupId)\n    .reduce((sum, item) => sum + safeNumber(item.amount), 0);\n  const positions = calcPositions();\n",
-              'app dashboard projection summary'
-          )
-          replace_once(
-              'app.js',
-              "  $('#monthLabel').textContent = monthLabel(selectedMonth);\n  $('#netWorth').textContent = currency.format(positions.netWorth);\n",
-              "  $('#monthLabel').textContent = monthLabel(selectedMonth);\n  const balanceLabel = $('#monthBalance')?.closest('.mini-metric')?.querySelector('span');\n  if (balanceLabel) balanceLabel.textContent = projectedRows.length ? 'Saldo projetado do mês' : 'Saldo do mês';\n  $('#netWorth').textContent = currency.format(positions.netWorth);\n",
-              'app projected balance label'
-          )
-          replace_once(
-              'app.js',
-              "  $('#debtRatio').textContent = `${currency.format(spending.recurringExpenses)} recorrentes + ${currency.format(spending.otherExpenses)} demais`;\n",
-              "  const otherWithoutProjectedCard = Math.max(0, spending.otherExpenses - projectedCardExpenses);\n  $('#debtRatio').textContent = projectedCardExpenses > 0\n    ? `${currency.format(spending.recurringExpenses)} recorrentes + ${currency.format(projectedCardExpenses)} cartão previsto + ${currency.format(otherWithoutProjectedCard)} demais`\n    : `${currency.format(spending.recurringExpenses)} recorrentes + ${currency.format(spending.otherExpenses)} demais`;\n",
-              'app spending breakdown'
-          )
-
-          replace_once(
-              'mobile/mobile.js',
-              "  CONTRIBUTION_CATEGORY, cardDebtMetrics, monthMetrics, periodSpendingMetrics, positionMetrics, safeNumber, walletMetrics, ymd\n",
-              "  CONTRIBUTION_CATEGORY, cardDebtMetrics, monthMetrics, periodSpendingMetrics, positionMetrics, projectedCardInstallmentRows, safeNumber, walletMetrics, ymd\n",
-              'mobile import'
-          )
-          replace_once(
-              'mobile/mobile.js',
-              "function renderDashboard() {\n  const now = new Date(); now.setDate(1);\n  const metrics = monthMetrics(txCache,now,recurringCache);\n  const spending = periodSpendingMetrics(txCache,recurringCache,now);\n  const positions = positionMetrics(positionsCache,txCache,ymd(new Date()),walletsCache,cardsCache,scheduledCache);\n",
-              "function renderDashboard() {\n  const now = new Date(); now.setDate(1);\n  const projectedCard = projectedCardInstallmentRows(txCache, scheduledCache, now);\n  const projectedTx = projectedCard.length ? [...txCache, ...projectedCard] : txCache;\n  const metrics = monthMetrics(projectedTx,now,recurringCache);\n  const spending = periodSpendingMetrics(projectedTx,recurringCache,now);\n  const positions = positionMetrics(positionsCache,txCache,ymd(new Date()),walletsCache,cardsCache,scheduledCache);\n",
-              'mobile projected card metrics'
-          )
-          replace_once(
-              'mobile/mobile.js',
-              "  $('#monthBalance').textContent = currency.format(metrics.balance);\n  $('#monthIncome').textContent = currency.format(metrics.income);\n",
-              "  const balanceLabel = $('#monthBalance')?.closest('.metric')?.querySelector('span');\n  if (balanceLabel) balanceLabel.textContent = metrics.rows.some(item => item.projected === true) ? 'Saldo projetado do mês' : 'Saldo do mês';\n  $('#monthBalance').textContent = currency.format(metrics.balance);\n  $('#monthIncome').textContent = currency.format(metrics.income);\n",
-              'mobile projected balance label'
-          )
-
-          tests = Path('tests/finance-logic.test.mjs')
-          t = tests.read_text()
-          t = t.replace(
-              "  monthlySpendingGoal, periodSpendingMetrics, reserveMetrics, scoreMetrics, projectFutureValue\n",
-              "  monthlySpendingGoal, periodSpendingMetrics, projectedCardInstallmentRows, reserveMetrics, scoreMetrics, projectFutureValue, walletMetrics\n",
-              1
-          )
-          if 'projectedCardInstallmentRows' not in t.split("from '../finance-logic.js';",1)[0]:
-              raise SystemExit('test import patch failed')
-          extra = r'''
-
-test('future card installment reduces projected monthly balance and expenses without lowering real wallet early', () => {
-  const scheduled = [{
-    id:'inst_g1_001', status:'active', type:'expense', amount:103, category:'Compras', description:'West Gun',
-    dueDate:'2026-10-07', walletId:'w1', cardId:'c1', purchaseDate:'2026-09-07',
-    installmentGroupId:'g1', installmentNumber:1, installmentTotal:6
-  }];
-  const projected = projectedCardInstallmentRows([], scheduled, new Date(2026,9,1));
-  assert.equal(projected.length,1);
-  assert.equal(projected[0].projected,true);
-  assert.equal(projected[0].cardId,'c1');
-  const metrics = monthMetrics(projected,new Date(2026,9,1));
-  const spending = periodSpendingMetrics(projected,[],new Date(2026,9,1),new Date(2026,7,20));
-  assert.equal(metrics.consumption,103);
-  assert.equal(metrics.balance,-103);
-  assert.equal(spending.totalExpenses,103);
-  const wallet = walletMetrics([{id:'w1',initialBalance:1000}],[],[], '2026-10-01');
-  assert.equal(wallet.total,1000);
-});
-
-test('posted card installment replaces projection instead of duplicating monthly expense', () => {
-  const scheduled = [{
-    id:'inst_g1_001', status:'active', type:'expense', amount:103, category:'Compras', description:'West Gun',
-    dueDate:'2026-10-07', walletId:'w1', cardId:'c1', purchaseDate:'2026-09-07',
-    installmentGroupId:'g1', installmentNumber:1, installmentTotal:6
-  }];
-  const transactions = [{
-    id:'sched_inst_g1_001', type:'expense', amount:103, category:'Compras', description:'West Gun', date:'2026-10-07',
-    sourceType:'scheduled', sourceId:'inst_g1_001', walletId:'w1', cardId:'c1', installmentGroupId:'g1', installmentNumber:1, installmentTotal:6
-  }];
-  assert.equal(projectedCardInstallmentRows(transactions,scheduled,new Date(2026,9,1)).length,0);
-  const metrics = monthMetrics(transactions,new Date(2026,9,1));
-  assert.equal(metrics.consumption,103);
-  assert.equal(metrics.balance,-103);
-});
-'''
-          if 'future card installment reduces projected monthly balance' in t:
-              raise SystemExit('projection regression tests already exist')
-          tests.write_text(t.rstrip() + extra + '\n')
-
-          sw = Path('sw.js')
-          root_sw = sw.read_text()
-          if 'meu-patrimonio-v41' not in root_sw:
-              raise SystemExit('unexpected root cache version')
-          sw.write_text(root_sw.replace('meu-patrimonio-v41','meu-patrimonio-v42',1))
-
-          msw = Path('mobile/sw.js')
-          mobile_sw = msw.read_text()
-          if 'mp-mobile-v14' not in mobile_sw:
-              raise SystemExit('unexpected mobile cache version')
-          msw.write_text(mobile_sw.replace('mp-mobile-v14','mp-mobile-v15',1))
-          PY
       - name: Validate JavaScript syntax
         run: |
           node --check app.js
+          node --check registration.js
+          node --check security-hardening.js
+          node --check privacy-controls.js
+          node --check dashboard-metrics.js
           node --check finance-logic.js
-          node --check mobile/mobile.js
+          node --check firebase-config.js
+          node --check supabase-config.js
+          node --check supabase-client.js
+          node --check compat/firebase-app.js
+          node --check compat/firebase-auth.js
+          node --check compat/firebase-firestore.js
+          node --check compat/firebase-app-check.js
+          node --check portfolio.js
           node --check sw.js
+          node --check mobile/mobile.js
           node --check mobile/sw.js
+          node --check tools/firebase-to-supabase/migrate-firestore-data.mjs
       - name: Run financial and security tests
         run: node --test tests/*.test.mjs
-      - name: Publish validated patch to feature branch
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git checkout origin/main -- .github/workflows/pages.yml
-          git add -- .github/workflows/pages.yml finance-logic.js app.js mobile/mobile.js tests/finance-logic.test.mjs sw.js mobile/sw.js
-          git commit -m "Projeta parcelas do cartão no saldo e despesas mensais"
-          git push origin HEAD:fix/project-card-expenses-monthly
 
   deploy:
     if: github.event_name != 'pull_request'
