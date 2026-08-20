@@ -34,3 +34,9 @@ test('posted card installment replaces projection instead of duplicating monthly
   assert.equal(metrics.consumption,103);
   assert.equal(metrics.balance,-103);
 });
+
+test('card installment is projected only in its invoice due month', () => {
+  assert.equal(projectedCardInstallmentRows([],scheduled,new Date(2026,8,1)).length,0);
+  assert.equal(projectedCardInstallmentRows([],scheduled,new Date(2026,9,1)).length,1);
+  assert.equal(projectedCardInstallmentRows([],scheduled,new Date(2026,10,1)).length,0);
+});
