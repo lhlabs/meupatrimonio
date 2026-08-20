@@ -22,7 +22,9 @@ test('agendamentos usam um único gerador de id em materialização e previsão'
   assert.ok(uses.length >= 3, `esperados definição + 2 usos; encontrados ${uses.length}`);
 });
 
-test('edição da ocorrência não sobrescreve o vínculo com o agendamento', () => {
-  assert.match(app, /updateDoc\(userDoc\('transactions', id\), \{ type, amount, category, description, date \}\)/);
+test('edição da ocorrência preserva vínculo com agendamento e permite carteira', () => {
+  const update = app.match(/updateDoc\(userDoc\('transactions', id\), \{[^}]+\}\)/)?.[0] || '';
+  assert.match(update, /type, amount, category, description, date, walletId, cardId:null/);
+  assert.doesNotMatch(update, /sourceType|sourceId/);
   assert.match(app, /sourceType: 'scheduled',[\s\S]{0,80}sourceId: scheduled\.id/);
 });
