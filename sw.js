@@ -1,4 +1,4 @@
-const CACHE='meu-patrimonio-v30';
+const CACHE='meu-patrimonio-v31';
 const FILES=['./','./index.html','./styles.css','./styles.base.css','./app.js','./registration.js','./security-hardening.js','./privacy-controls.js','./dashboard-metrics.js','./finance-logic.js','./firebase-config.js','./supabase-config.js','./supabase-client.js','./compat/firebase-app.js','./compat/firebase-auth.js','./compat/firebase-firestore.js','./compat/firebase-app-check.js','./manifest.webmanifest','./icon.svg'];
 self.addEventListener('install',event=>{self.skipWaiting();event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(FILES)))});
 self.addEventListener('activate',event=>{event.waitUntil(Promise.all([caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))),self.clients.claim()]))});

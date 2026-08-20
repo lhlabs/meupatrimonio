@@ -84,6 +84,15 @@ function generatedId() {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
 }
 
+async function requireSingleMutation(query, ref, operation) {
+  const key = ref.singleton ? 'user_id' : 'id';
+  const { data, error } = await query.select(key);
+  if (error) throw error;
+  if (!Array.isArray(data) || data.length !== 1) {
+    throw new Error(`${operation} não alterou o registro solicitado.`);
+  }
+}
+
 export function getFirestore() {
   return { provider: 'supabase' };
 }
@@ -154,16 +163,14 @@ export async function updateDoc(ref, data) {
     .update(normalizeWrite(data))
     .eq('user_id', ref.userId);
   if (!ref.singleton) query = query.eq('id', ref.id);
-  const { error } = await query;
-  if (error) throw error;
+  await requireSingleMutation(query, ref, 'Atualização');
 }
 
 export async function deleteDoc(ref) {
   if (ref.kind === 'userRoot') return;
   let query = supabase.from(ref.table).delete().eq('user_id', ref.userId);
   if (!ref.singleton) query = query.eq('id', ref.id);
-  const { error } = await query;
-  if (error) throw error;
+  await requireSingleMutation(query, ref, 'Exclusão');
 }
 
 export function writeBatch() {
