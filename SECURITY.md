@@ -2,73 +2,61 @@
 
 ## Modelo de segurança
 
-O aplicativo é um cliente web/PWA estático hospedado no GitHub Pages. A segurança dos dados privados não depende do JavaScript entregue ao navegador: ela é aplicada pelo Supabase Auth, PostgreSQL e Row Level Security (RLS).
+O Meu Patrimônio é um cliente web/PWA estático hospedado no GitHub Pages. A proteção dos dados privados não depende do JavaScript entregue ao navegador: a autorização efetiva é aplicada por Supabase Auth, PostgreSQL e Row Level Security (RLS).
 
-- Cada tabela financeira possui `user_id` referenciando `auth.users(id)`.
-- Todas as tabelas expostas do aplicativo têm RLS habilitado e forçado.
+- Cada tabela financeira possui `user_id` referenciando `auth.users(id)` com `ON DELETE CASCADE`.
+- Todas as tabelas financeiras expostas têm RLS habilitado e forçado.
 - As políticas exigem `(select auth.uid()) = user_id` em `USING` e `WITH CHECK`.
 - O papel `anon` não recebe CRUD nas tabelas financeiras.
-- O frontend usa somente a URL pública do projeto e uma publishable key `sb_publishable_...`.
-- Secret keys `sb_secret_...`, credenciais Firebase Admin, tokens administrativos e arquivos `.env` nunca podem ser enviados ao navegador ou commitados.
+- O papel `authenticated` recebe somente `SELECT`, `INSERT`, `UPDATE` e `DELETE`; RLS limita as linhas ao próprio usuário.
+- O frontend usa apenas a URL pública do projeto e uma publishable key `sb_publishable_...`.
+- Secret keys `sb_secret_...`, service-role keys, credenciais administrativas e arquivos `.env` nunca podem ser enviados ao navegador ou commitados.
 
 ## Controles implementados
 
 - isolamento por usuário no PostgreSQL via RLS;
-- foreign keys para `auth.users` com `ON DELETE CASCADE`;
-- validações de esquema, tipos, categorias, tamanhos e faixas monetárias no banco;
-- IDs compatíveis com os documentos históricos do Firestore;
+- validações de tipos, categorias, tamanhos, datas e faixas monetárias no banco;
+- IDs e contratos de dados compatíveis com a lógica atual do aplicativo;
 - timestamps de criação e atualização controlados pelo PostgreSQL para operações do PWA;
 - preservação de `createdAt` em atualizações;
-- sessão do navegador/PWA em `sessionStorage` com renovação automática do token;
-- bloqueio da interface após 15 minutos de inatividade;
-- senha de cadastro reforçada no cliente para 12+ caracteres com maiúscula, minúscula, número e símbolo;
+- cliente web completo com sessão limitada à sessão do navegador;
+- PWA mobile com sessão persistente no dispositivo para manter a experiência de aplicativo instalado;
+- encerramento da sessão após 15 minutos de inatividade enquanto o aplicativo está em uso;
+- senha de cadastro reforçada na interface para 12+ caracteres com maiúscula, minúscula, número e símbolo;
 - confirmação de e-mail e recuperação de senha pelo Supabase Auth;
-- exclusão de conta por Edge Function autenticada, com `verify_jwt = true` e chave secreta somente no ambiente do servidor;
+- exclusão da própria conta por Edge Function: a interface exige nova autenticação por senha e a função valida o JWT do usuário antes de executar a exclusão administrativa;
 - exclusão da conta propagada às tabelas financeiras por `ON DELETE CASCADE`;
-- cache PWA restrito aos arquivos estáticos necessários;
-- GitHub Actions com menor privilégio e credenciais de checkout não persistidas;
-- `.gitignore` cobrindo credenciais e exportações temporárias de migração.
+- endpoint temporário usado durante os testes de migração de usuários do Firebase aposentado e neutralizado;
+- PWA e atalhos mobile preservados;
+- GitHub Actions com permissões explícitas, testes automatizados e checkout sem persistência de credenciais;
+- `.gitignore` cobrindo credenciais, chaves e exportações temporárias.
 
-## Configurações obrigatórias no Supabase
+## Edge Function `delete-account`
 
-Antes do corte de produção, confirme no projeto definitivo:
+O projeto utiliza publishable/secret API keys do modelo atual do Supabase. A função `delete-account` mantém `verify_jwt = false` no gateway e faz a autenticação explicitamente no corpo da função com `auth.getUser(token)`, antes de utilizar a secret key disponível apenas no ambiente da Edge Function. Essa configuração é intencional para o modelo de novas API keys e não torna o endpoint público para operações administrativas: sem um JWT de sessão válido, a exclusão é rejeitada.
 
-1. Aplicar todas as migrations em `supabase/migrations/`.
-2. Validar os Security Advisors após a aplicação do schema.
-3. Manter confirmação de e-mail habilitada no Supabase Auth.
-4. Configurar Site URL e Redirect URLs somente para os endereços legítimos do Meu Patrimônio.
-5. Manter uma política forte de senha no Auth compatível com a interface.
-6. Usar publishable key no frontend; nunca usar secret key no navegador.
-7. Implantar `delete-account` com JWT obrigatório.
-8. Revisar periodicamente usuários, logs de autenticação, advisors, quotas e faturamento.
+Nunca permita que o cliente forneça livremente o UUID a ser excluído. A identidade removida deve vir exclusivamente do JWT validado pelo servidor.
 
-## Migração do Firebase
+## Estado da migração
 
-A migração deve ocorrer em uma janela controlada e na seguinte ordem:
+Não há requisito de preservar usuários ou dados existentes do Firebase. O Supabase é tratado como a nova fonte de verdade. Arquivos de configuração e regras de implantação do Firebase foram removidos da branch de migração; o nome `firebase-config.js` e os imports históricos permanecem somente como uma camada de compatibilidade interna para evitar alterar a lógica e o fluxo da interface durante a troca de infraestrutura. O import map redireciona esses módulos para implementações baseadas em Supabase, portanto o Firebase SDK não é carregado em produção.
 
-1. Criar e proteger o projeto Supabase definitivo.
-2. Migrar as contas do Firebase Authentication para o Supabase Auth.
-3. Mapear cada usuário pelo e-mail para o UUID criado no Supabase.
-4. Migrar `transactions`, `positions`, `planning`, `monthlyGoals`, `recurring` e `scheduled`.
-5. Conferir contagens de origem e destino por usuário.
-6. Validar autenticação e CRUD com pelo menos duas contas distintas para testar isolamento RLS.
-7. Somente depois preencher `supabase-config.js` e promover a branch para produção.
+## Configurações de produção
 
-O utilitário em `tools/firebase-to-supabase/` lê credenciais administrativas apenas de variáveis de ambiente. Arquivos de service account e secret keys não pertencem ao repositório.
-
-## Exclusão e privacidade
-
-A interface de Planejamento permite excluir conta e dados. O usuário precisa informar novamente sua senha. Após a reautenticação, a Edge Function identifica o usuário pelo JWT e exclui somente aquela conta no Supabase Auth; as linhas financeiras vinculadas são removidas por cascade no banco.
-
-Nunca permita que o cliente forneça livremente o UUID a ser excluído. A identidade utilizada para exclusão deve sempre vir do JWT validado pelo servidor.
+- manter confirmação de e-mail habilitada no Supabase Auth;
+- configurar Site URL e Redirect URLs somente para endereços legítimos do Meu Patrimônio;
+- manter política forte de senha no Auth alinhada à interface;
+- usar somente a publishable key no frontend;
+- revisar periodicamente Auth Logs, Edge Function Logs, Security Advisors, quotas e faturamento;
+- habilitar Leaked Password Protection no Supabase Auth quando disponível no plano/configuração da conta.
 
 ## Resposta a incidente
 
 Se uma credencial administrativa real for exposta:
 
-1. revogar/rotacionar imediatamente a credencial no provedor;
+1. revogar ou rotacionar imediatamente a credencial no provedor;
 2. remover a credencial do código e de qualquer artefato publicado;
-3. considerar o histórico Git comprometido até concluir rotação e limpeza apropriadas;
+3. considerar o histórico Git comprometido até concluir a rotação e a limpeza apropriadas;
 4. revisar logs de autenticação, banco e funções;
-5. avaliar acesso ou alteração indevida de dados;
+5. avaliar eventual leitura ou alteração indevida de dados;
 6. avaliar impacto sobre titulares e obrigações de comunicação aplicáveis.
