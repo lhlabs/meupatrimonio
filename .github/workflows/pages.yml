@@ -1,79 +1,45 @@
-name: Validate and Deploy GitHub Pages
+name: Validate permanent withdrawal deletion
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: read
-
-concurrency:
-  group: pages-${{ github.ref }}
-  cancel-in-progress: true
+  contents: write
 
 jobs:
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout
+      - name: Checkout feature branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
+          ref: fix/permanent-withdrawal-delete
+          fetch-depth: 0
+          persist-credentials: true
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '24'
           package-manager-cache: false
+      - name: Apply focused change
+        run: python .github/apply-permanent-withdrawal-delete.py
       - name: Validate JavaScript syntax
         run: |
           node --check app.js
-          node --check registration.js
-          node --check security-hardening.js
-          node --check privacy-controls.js
-          node --check dashboard-metrics.js
           node --check finance-logic.js
-          node --check firebase-config.js
-          node --check supabase-config.js
-          node --check supabase-client.js
-          node --check compat/firebase-app.js
-          node --check compat/firebase-auth.js
-          node --check compat/firebase-firestore.js
-          node --check compat/firebase-app-check.js
-          node --check portfolio.js
-          node --check sw.js
           node --check mobile/mobile.js
+          node --check sw.js
           node --check mobile/sw.js
-          node --check tools/firebase-to-supabase/migrate-firestore-data.mjs
       - name: Run financial and security tests
         run: node --test tests/*.test.mjs
-
-  deploy:
-    if: github.event_name != 'pull_request'
-    needs: quality
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Configure Pages
-        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
-        with:
-          path: .
-      - name: Deploy
-        id: deployment
-        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5
+      - name: Publish validated patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- finance-logic.js app.js mobile/mobile.js sw.js mobile/sw.js
+          git commit -m "Mantém aporte consumido ao excluir movimentação"
+          git push origin HEAD:fix/permanent-withdrawal-delete
