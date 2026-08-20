@@ -141,6 +141,12 @@ function prepareUi() {
   if (savingLabel) savingLabel.textContent = 'Taxa de aporte líquido';
   const spendingLabel = $('#debtValue')?.closest('.mini-metric')?.querySelector('span');
   if (spendingLabel) spendingLabel.textContent = 'Gastos do período';
+  const patrimonyKicker = $('#netWorth')?.closest('.networth-card')?.querySelector('.card-kicker');
+  if (patrimonyKicker) patrimonyKicker.textContent = 'PATRIMÔNIO';
+  const patrimonyLabels = $$('#patrimonySection .metric-strip .mini-metric > span');
+  if (patrimonyLabels[0]) patrimonyLabels[0].textContent = 'Ativos';
+  if (patrimonyLabels[1]) patrimonyLabels[1].textContent = 'Dívidas (informativo)';
+  if (patrimonyLabels[2]) patrimonyLabels[2].textContent = 'Patrimônio';
 
   const goalCard = $('.goal-card');
   if (goalCard) {
@@ -248,7 +254,7 @@ function installAccountUi() {
   panel.className = 'panel account-hub';
   panel.innerHTML = `
     <div class="panel-head account-head"><div><span class="card-kicker">CARTEIRAS</span><h2>Onde seu dinheiro está</h2><p class="muted">O saldo é calculado pelo saldo inicial + movimentações. Cartões baixam a carteira pagadora somente no vencimento.</p></div><div class="button-row"><button id="openWalletBtn" class="ghost-btn" type="button">+ Carteira</button><button id="openCardBtn" class="primary compact" type="button">+ Cartão</button></div></div>
-    <div class="account-summary"><div><span>Saldo em carteiras</span><strong id="walletsTotal">R$ 0</strong></div><div><span>Cartões em aberto</span><strong id="cardsOpenTotal">R$ 0</strong></div><div><span>Disponível líquido</span><strong id="accountsLiquid">R$ 0</strong></div></div>
+    <div class="account-summary"><div><span>Saldo em carteiras</span><strong id="walletsTotal">R$ 0</strong></div><div><span>Cartões em aberto</span><strong id="cardsOpenTotal">R$ 0</strong></div><div><span>Limite disponível</span><strong id="accountsLiquid">R$ 0</strong></div></div>
     <div class="account-section-title"><strong>Instituições e contas</strong><small id="walletCount" class="muted"></small></div><div id="walletCards" class="account-grid"></div>
     <div class="account-section-title"><strong>Cartões de crédito</strong><small id="cardCount" class="muted"></small></div><div id="creditCardCards" class="account-grid"></div>
     <div class="account-section-title"><strong>Compras parceladas</strong><small class="muted">parcelas futuras</small></div><div id="installmentGroups" class="installment-list"></div>`;
@@ -346,7 +352,7 @@ function renderAccounts() {
   const cards = cardDebtMetrics(cardsCache, txCache, scheduledCache, today);
   $('#walletsTotal').textContent = currency.format(wallets.total);
   $('#cardsOpenTotal').textContent = currency.format(cards.total);
-  $('#accountsLiquid').textContent = currency.format(wallets.total - cards.total);
+  $('#accountsLiquid').textContent = currency.format(cards.byCard.reduce((sum, item) => sum + safeNumber(item.availableLimit), 0));
   $('#walletCount').textContent = `${walletsCache.filter(item => item.active !== false).length} ativas`;
   $('#cardCount').textContent = `${cardsCache.filter(item => item.active !== false).length} ativos`;
   $('#walletCards').innerHTML = wallets.byWallet.map(item => `<div class="account-card ${item.active === false ? 'inactive' : ''}"><div class="account-card-top"><div class="account-logo">🏦</div><div><strong>${esc(item.name)}</strong><small>${esc(item.institution)} · ${walletTypeLabel(item.type)}</small></div></div><div class="account-balance"><span>Saldo atual</span><strong class="${item.balance < 0 ? 'expense' : ''}">${currency.format(item.balance)}</strong></div><div class="row-actions"><button class="mini-btn" data-edit-wallet="${item.id}">Editar</button><button class="mini-btn" data-toggle-wallet="${item.id}">${item.active === false ? 'Reativar' : 'Arquivar'}</button></div></div>`).join('') || '<div class="empty-state">Cadastre sua primeira instituição e conta.</div>';
@@ -369,7 +375,8 @@ function renderAccounts() {
     const remaining = active.reduce((sum,item) => sum + safeNumber(item.amount),0);
     const paid = new Set(group.posted.map(item => item.installmentNumber).filter(Boolean)).size;
     const card = cardById(group.cardId);
-    return `<div class="installment-row"><div><strong>${esc(group.description || 'Compra parcelada')}</strong><small>${esc(card?.name || 'Cartão')} · ${paid}/${group.total} pagas · próxima ${formatDate(active[0]?.dueDate)}</small></div><div><strong>${currency.format(remaining)}</strong><small>saldo parcelado</small></div><button class="mini-btn danger" data-delete-installment-group="${esc(group.id)}">Excluir futuras</button></div>`;
+    const firstInvoice = active[0]?.dueDate ? monthLabel(dateFromMonthKey(String(active[0].dueDate).slice(0,7))) : '—';
+    return `<div class="installment-row"><div><strong>${esc(group.description || 'Compra parcelada')}</strong><small>${esc(card?.name || 'Cartão')} · ${paid}/${group.total} pagas · 1ª fatura futura ${esc(firstInvoice)} · próxima ${formatDate(active[0]?.dueDate)}</small></div><div><strong>${currency.format(remaining)}</strong><small>saldo parcelado</small></div><div class="row-actions"><button class="mini-btn" data-edit-installment-group="${esc(group.id)}">Editar</button><button class="mini-btn danger" data-delete-installment-group="${esc(group.id)}">Excluir futuras</button></div></div>`;
   }).join('') || '<div class="empty-state">Nenhuma compra parcelada em aberto.</div>';
   refreshAccountSelects();
 }
@@ -382,10 +389,12 @@ function installTransactionRoutingUi() {
   const box = document.createElement('div');
   box.id = 'transactionRouting';
   box.className = 'routing-box';
-  box.innerHTML = `<label>Movimentar em<select id="transactionRoute"><option value="wallet">Carteira / conta</option><option value="card">Cartão de crédito</option><option value="none">Sem carteira (legado)</option></select></label><label id="transactionWalletLabel">Carteira<select id="transactionWalletId"></select></label><label id="transactionCardLabel" class="hidden">Cartão<select id="transactionCardId"></select></label><label id="transactionInstallmentsLabel" class="hidden">Parcelas<select id="transactionInstallments">${Array.from({length:60},(_,i)=>`<option value="${i+1}">${i+1}x</option>`).join('')}</select></label><small id="transactionRouteHint" class="muted routing-hint"></small>`;
+  box.innerHTML = `<label>Movimentar em<select id="transactionRoute"><option value="wallet">Carteira / conta</option><option value="card">Cartão de crédito</option><option value="none">Sem carteira (legado)</option></select></label><label id="transactionWalletLabel">Carteira<select id="transactionWalletId"></select></label><label id="transactionCardLabel" class="hidden">Cartão<select id="transactionCardId"></select></label><label id="transactionInstallmentsLabel" class="hidden">Parcelas<select id="transactionInstallments">${Array.from({length:60},(_,i)=>`<option value="${i+1}">${i+1}x</option>`).join('')}</select></label><label id="transactionFirstInvoiceLabel" class="hidden">Mês da primeira fatura<input id="transactionFirstInvoiceMonth" type="month"></label><small id="transactionRouteHint" class="muted routing-hint"></small>`;
   form.insertBefore(box, recurringLabel);
-  $('#transactionRoute').addEventListener('change', syncTransactionRouting);
-  $('#transactionCardId').addEventListener('change', syncTransactionRouting);
+  $('#transactionRoute').addEventListener('change', () => { syncTransactionRouting(); syncFirstInvoiceMonth(); });
+  $('#transactionCardId').addEventListener('change', () => syncFirstInvoiceMonth(true));
+  $('#transactionDate').addEventListener('change', () => syncFirstInvoiceMonth(true));
+  $('#transactionFirstInvoiceMonth').addEventListener('change', event => { event.target.dataset.manual = 'true'; });
 
   const recurringForm = $('#recurringForm');
   const recurringButton = recurringForm?.querySelector('button[type="submit"]');
@@ -407,6 +416,19 @@ function installTransactionRoutingUi() {
   refreshAccountSelects();
 }
 
+function syncFirstInvoiceMonth(force = false) {
+  const input = $('#transactionFirstInvoiceMonth');
+  if (!input || $('#transactionRoute')?.value !== 'card' || $('#transactionType')?.value !== 'expense') return;
+  if (!force && input.dataset.manual === 'true' && input.value) return;
+  const card = cardById($('#transactionCardId')?.value);
+  const purchaseDate = $('#transactionDate')?.value;
+  if (!card || !/^\d{4}-\d{2}-\d{2}$/.test(String(purchaseDate || ''))) return;
+  const preview = cardInstallmentSchedule({ amount:1, installments:1, purchaseDate, closingDay:card.closingDay, dueDay:card.dueDay });
+  input.min = purchaseDate.slice(0, 7);
+  input.value = preview[0]?.date?.slice(0, 7) || purchaseDate.slice(0, 7);
+  input.dataset.manual = 'false';
+}
+
 function syncTransactionRouting() {
   if (!$('#transactionRoute')) return;
   const type = $('#transactionType')?.value || 'expense';
@@ -416,6 +438,7 @@ function syncTransactionRouting() {
   $('#transactionWalletLabel')?.classList.toggle('hidden', route !== 'wallet');
   $('#transactionCardLabel')?.classList.toggle('hidden', !cardMode);
   $('#transactionInstallmentsLabel')?.classList.toggle('hidden', !cardMode);
+  $('#transactionFirstInvoiceLabel')?.classList.toggle('hidden', !cardMode);
   const recurring = $('#transactionRecurring');
   const recurringLabel = recurring?.closest('label');
   if (recurring) {
@@ -427,7 +450,8 @@ function syncTransactionRouting() {
   const dateLabel = $('#transactionDate')?.closest('label');
   if (dateLabel?.childNodes[0]) dateLabel.childNodes[0].textContent = cardMode ? 'Data da compra' : 'Data';
   const hint = $('#transactionRouteHint');
-  if (hint) hint.textContent = cardMode ? 'O valor informado é o total da compra. As parcelas entram nos meses de vencimento da fatura e a carteira pagadora é movimentada automaticamente.' : route === 'wallet' ? 'Esta movimentação altera o saldo da carteira escolhida.' : 'Lançamentos sem carteira ficam fora dos saldos por instituição.';
+  if (hint) hint.textContent = cardMode ? 'O valor informado é o total da compra. Escolha o mês da primeira fatura; as parcelas seguintes avançam mês a mês e a carteira pagadora só é movimentada no vencimento.' : route === 'wallet' ? 'Esta movimentação altera o saldo da carteira escolhida.' : 'Lançamentos sem carteira ficam fora dos saldos por instituição.';
+  if (cardMode) syncFirstInvoiceMonth();
 }
 
 function installDebtFieldsUi() {
@@ -940,7 +964,7 @@ function renderDashboard() {
 
   $('#monthLabel').textContent = monthLabel(selectedMonth);
   $('#netWorth').textContent = currency.format(positions.netWorth);
-  $('#netWorthContext').textContent = `${currency.format(positions.assets)} em ativos − ${currency.format(positions.debts)} em dívidas`;
+  $('#netWorthContext').textContent = `${currency.format(positions.assets)} em ativos · ${currency.format(positions.debts)} em dívidas (informativo)`;
   $('#monthBalance').textContent = currency.format(metrics.balance);
   $('#balanceTrend').textContent = prev.totalOut === 0 && prev.income === 0
     ? 'Sem base anterior'
@@ -1042,8 +1066,9 @@ function txRow(tx) {
   const account = card ? ` · ${esc(card.name)}` : wallet ? ` · ${esc(wallet.name)}` : '';
   const source = tx.sourceType === 'recurring' ? (tx.projected ? ' · recorrente prevista' : ' · recorrente') : tx.sourceType === 'scheduled' ? (tx.projected ? ' · prevista' : ' · agendada') : '';
   let actions = '';
-  if (tx.projected) actions = '<span class="muted">Previsto</span>';
-  else if (tx.installmentGroupId) actions = '<span class="muted">Parcela</span>';
+  if (tx.projected && tx.installmentGroupId) actions = `<button class="mini-btn" data-edit-installment-group="${esc(tx.installmentGroupId)}">Editar</button><span class="muted">Previsto</span>`;
+  else if (tx.projected) actions = '<span class="muted">Previsto</span>';
+  else if (tx.installmentGroupId) actions = `<button class="mini-btn" data-edit-installment-group="${esc(tx.installmentGroupId)}">Editar futuras</button><span class="muted">Parcela</span>`;
   else if (isWithdrawal(tx)) actions = `<button class="mini-btn danger" data-delete-tx="${tx.id}">Excluir</button>`;
   else if (tx.sourceType === 'scheduled') actions = `<button class="mini-btn" data-edit-tx="${tx.id}">Editar</button><span class="muted">Agendado</span>`;
   else if (tx.sourceType) actions = '<span class="muted">Automático</span>';
@@ -1288,7 +1313,7 @@ function renderPlanning() {
   const reserve = reserveMetrics({ reserve: positions.reserve, transactions: txCache, recurring: recurringCache, todayYmd: ymd(new Date()), targetMonths: safeNumber(settings.reserveTargetMonths) || 6 });
   const items = [];
   if (positions.reserve > 0) items.push(`Reserva considerada: <b>${currency.format(positions.reserve)}</b> = <b>${currency.format(positions.manualReserve)}</b> cadastrados como reserva + <b>${currency.format(positions.contributionAssets)}</b> em aportes líquidos.`);
-  if (positions.debts > 0) items.push(`Dívidas cadastradas: <b>${currency.format(positions.debts)}</b>. O saldo devedor entra no patrimônio líquido; parcelas mensais entram apenas no fluxo de caixa.`);
+  if (positions.debts > 0) items.push(`Dívidas cadastradas: <b>${currency.format(positions.debts)}</b>. São exibidas para acompanhamento, mas não reduzem o patrimônio; pagamentos efetivos entram no fluxo de caixa.`);
   if (reserve.months != null) items.push(`A reserva atual cobre <b>${reserve.months.toFixed(1)} meses</b>, usando despesas recorrentes ativas de <b>${currency.format(reserve.monthlyBase)}</b> por mês.`);
   if (monthly > 0) items.push(`A projeção usa aporte mensal de <b>${currency.format(monthly)}</b> e retorno real de <b>${rate.toFixed(1)}% a.a.</b>. É um cenário matemático, não uma promessa de retorno.`);
   $('#diagnosis').innerHTML = (items.length ? items : ['Cadastre patrimônio, metas e lançamentos para liberar o diagnóstico.']).map(text => `<div class="diagnosis-item">${text}</div>`).join('');
@@ -1306,8 +1331,98 @@ function setTxType(type, currentCategory) {
   syncTransactionRouting();
 }
 
+function openInstallmentGroup(groupId) {
+  const active = scheduledCache.filter(item => item.status === 'active' && item.installmentGroupId === groupId).sort((a,b) => String(a.dueDate || '').localeCompare(String(b.dueDate || '')));
+  const posted = txCache.filter(item => item.installmentGroupId === groupId).sort((a,b) => String(a.date || '').localeCompare(String(b.date || '')));
+  if (!active.length) return toast('Não há parcelas futuras para editar.');
+  const sample = active[0];
+  const hasPosted = posted.length > 0;
+  $('#transactionForm').reset();
+  $('#transactionEditId').value = `installment:${groupId}`;
+  const title = $('#transactionDialog h2');
+  if (title) title.textContent = 'Editar compra no cartão';
+  setTxType('expense', sample.category);
+  $('#transactionAmount').value = active.reduce((sum, item) => sum + safeNumber(item.amount), 0).toFixed(2);
+  $('#transactionDescription').value = sample.description || sample.name || '';
+  $('#transactionDate').value = sample.purchaseDate || ymd(new Date());
+  $('#transactionRoute').value = 'card';
+  $('#transactionCardId').value = sample.cardId || '';
+  $('#transactionInstallments').value = String(active.length);
+  $('#transactionFirstInvoiceMonth').value = String(sample.dueDate || '').slice(0, 7);
+  $('#transactionFirstInvoiceMonth').dataset.manual = 'true';
+  if (hasPosted) {
+    const lastPostedMonth = String(posted.at(-1)?.date || '').slice(0, 7);
+    const lastPostedDate = dateFromMonthKey(lastPostedMonth);
+    if (lastPostedDate) {
+      lastPostedDate.setMonth(lastPostedDate.getMonth() + 1);
+      $('#transactionFirstInvoiceMonth').min = monthKey(lastPostedDate);
+    }
+  } else {
+    $('#transactionFirstInvoiceMonth').min = String(sample.purchaseDate || '').slice(0, 7);
+  }
+  const invoiceLabel = $('#transactionFirstInvoiceLabel');
+  if (invoiceLabel?.childNodes[0]) invoiceLabel.childNodes[0].textContent = hasPosted ? 'Mês da próxima fatura' : 'Mês da primeira fatura';
+  $('#transactionRoute').disabled = true;
+  $('#transactionCardId').disabled = hasPosted;
+  $('#transactionDate').disabled = hasPosted;
+  $('#transactionInstallments').disabled = hasPosted;
+  const amountLabel = $('#transactionAmount')?.closest('label');
+  if (amountLabel?.childNodes[0]) amountLabel.childNodes[0].textContent = hasPosted ? 'Valor restante das parcelas futuras' : 'Valor total da compra';
+  syncTransactionRouting();
+  const hint = $('#transactionRouteHint');
+  if (hint && hasPosted) hint.textContent += ` ${posted.length} parcela(s) já realizada(s) permanecem no histórico; a edição altera somente as ${active.length} futuras.`;
+  $('#transactionDialog').showModal();
+}
+
+async function saveInstallmentGroupEdit(groupId, { amount, category, description, purchaseDate }) {
+  const active = scheduledCache.filter(item => item.status === 'active' && item.installmentGroupId === groupId).sort((a,b) => String(a.dueDate || '').localeCompare(String(b.dueDate || '')));
+  const posted = txCache.filter(item => item.installmentGroupId === groupId).sort((a,b) => safeNumber(a.installmentNumber) - safeNumber(b.installmentNumber));
+  if (!active.length) throw new Error('Não há parcelas futuras para editar');
+  const sample = active[0];
+  const hasPosted = posted.length > 0;
+  const card = cardById($('#transactionCardId').value);
+  let installments = Math.trunc(safeNumber($('#transactionInstallments').value || active.length));
+  if (hasPosted) installments = active.length;
+  const firstInvoiceMonth = $('#transactionFirstInvoiceMonth').value;
+  if (!card || card.active === false || installments < 1 || installments > 60 || !/^\d{4}-\d{2}$/.test(firstInvoiceMonth)) throw new Error('Cartão, parcelas ou primeira fatura inválidos');
+  if (hasPosted && (card.id !== sample.cardId || purchaseDate !== sample.purchaseDate)) throw new Error('Cartão e data da compra não podem mudar após uma parcela realizada');
+  const schedule = cardInstallmentSchedule({ amount, installments, purchaseDate, closingDay:card.closingDay, dueDay:card.dueDay, firstInvoiceMonth });
+  if (schedule.length !== installments) throw new Error('A primeira fatura não pode vencer antes da compra e o valor deve comportar as parcelas');
+  const lastPostedDate = posted.at(-1)?.date || '';
+  if (hasPosted && schedule[0]?.date <= lastPostedDate) throw new Error('A próxima fatura deve ser posterior à última parcela já realizada');
+  const existingNumbers = active.map(item => Math.trunc(safeNumber(item.installmentNumber))).filter(Boolean);
+  const totalInstallments = hasPosted ? Math.trunc(safeNumber(sample.installmentTotal) || (posted.length + active.length)) : installments;
+  const nextIds = new Set();
+  for (let index = 0; index < schedule.length; index += 1) {
+    const part = schedule[index];
+    const installmentNumber = hasPosted ? (existingNumbers[index] || posted.length + index + 1) : part.installmentNumber;
+    const scheduledId = `inst_${groupId}_${String(installmentNumber).padStart(3,'0')}`;
+    nextIds.add(scheduledId);
+    await setDoc(userDoc('scheduled', scheduledId), {
+      name: `${description || category} · ${installmentNumber}/${totalInstallments}`,
+      type:'expense', amount:part.amount, category, description:description || category,
+      dueDate:part.date, frequency:'once', status:'active',
+      walletId:card.paymentWalletId, cardId:card.id, purchaseDate,
+      installmentGroupId:groupId, installmentNumber, installmentTotal:totalInstallments,
+      createdAt:serverTimestamp(), updatedAt:serverTimestamp()
+    });
+  }
+  for (const item of active) {
+    if (!nextIds.has(item.id)) await deleteDoc(userDoc('scheduled', item.id));
+  }
+}
+
 function openTransaction(tx = null) {
-  if (tx?.installmentGroupId) return toast('Compras parceladas são gerenciadas em Carteiras & patrimônio.');
+  if (tx?.installmentGroupId) return openInstallmentGroup(tx.installmentGroupId);
+  $('#transactionRoute').disabled = false;
+  $('#transactionCardId').disabled = false;
+  $('#transactionDate').disabled = false;
+  $('#transactionInstallments').disabled = false;
+  if ($('#transactionFirstInvoiceMonth')) { $('#transactionFirstInvoiceMonth').value = ''; $('#transactionFirstInvoiceMonth').dataset.manual = 'false'; }
+  const invoiceLabel = $('#transactionFirstInvoiceLabel');
+  if (invoiceLabel?.childNodes[0]) invoiceLabel.childNodes[0].textContent = 'Mês da primeira fatura';
+  const amountLabel = $('#transactionAmount')?.closest('label');
+  if (amountLabel?.childNodes[0]) amountLabel.childNodes[0].textContent = 'Valor';
   if (tx && (tx.sourceType === 'recurring' || tx.projected || isWithdrawal(tx))) return;
   $('#transactionForm').reset();
   $('#transactionEditId').value = tx?.id || '';
@@ -1431,7 +1546,11 @@ $('#transactionForm').addEventListener('submit', async event => {
     const date = $('#transactionDate').value;
     const route = $('#transactionRoute')?.value || 'none';
     if (!(amount > 0) || !['income','expense'].includes(type) || !category || !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('Lançamento inválido');
-    if (id) {
+    const installmentGroupEdit = id.startsWith('installment:') ? id.slice('installment:'.length) : '';
+    if (installmentGroupEdit) {
+      if (type !== 'expense' || route !== 'card') throw new Error('Compra no cartão inválida');
+      await saveInstallmentGroupEdit(installmentGroupEdit, { amount, category, description, purchaseDate:date });
+    } else if (id) {
       const walletId = route === 'wallet' ? $('#transactionWalletId').value || null : null;
       if (walletsCache.some(item => item.active !== false) && route === 'wallet' && !walletId) throw new Error('Selecione a carteira');
       await updateDoc(userDoc('transactions', id), { type, amount, category, description, date, walletId, cardId:null });
@@ -1439,9 +1558,10 @@ $('#transactionForm').addEventListener('submit', async event => {
       if (type !== 'expense') throw new Error('Cartão aceita apenas despesas');
       const card = cardById($('#transactionCardId').value);
       const installments = Math.trunc(safeNumber($('#transactionInstallments').value || 1));
-      if (!card || card.active === false || installments < 1 || installments > 60) throw new Error('Cartão ou parcelamento inválido');
-      const schedule = cardInstallmentSchedule({ amount, installments, purchaseDate:date, closingDay:card.closingDay, dueDay:card.dueDay });
-      if (schedule.length !== installments) throw new Error('O valor é baixo demais para a quantidade de parcelas');
+      const firstInvoiceMonth = $('#transactionFirstInvoiceMonth').value;
+      if (!card || card.active === false || installments < 1 || installments > 60 || !/^\d{4}-\d{2}$/.test(firstInvoiceMonth)) throw new Error('Cartão, parcelamento ou primeira fatura inválidos');
+      const schedule = cardInstallmentSchedule({ amount, installments, purchaseDate:date, closingDay:card.closingDay, dueDay:card.dueDay, firstInvoiceMonth });
+      if (schedule.length !== installments) throw new Error('A primeira fatura não pode vencer antes da compra e o valor deve comportar as parcelas');
       const groupId = newEntityId('grp');
       for (const part of schedule) {
         const scheduledId = `inst_${groupId}_${String(part.installmentNumber).padStart(3,'0')}`;
@@ -1583,6 +1703,7 @@ document.addEventListener('click', async event => {
     await runAction(target, async () => { await updateDoc(userDoc('cards', card.id), { active:card.active === false, updatedAt:serverTimestamp() }); await loadAll(); }, card.active === false ? 'Cartão reativado' : 'Cartão arquivado');
     return;
   }
+  if (target.dataset.editInstallmentGroup) { openInstallmentGroup(target.dataset.editInstallmentGroup); return; }
   if (target.dataset.deleteInstallmentGroup && confirm('Excluir todas as parcelas futuras desta compra? Parcelas já lançadas permanecem no histórico.')) {
     const groupId = target.dataset.deleteInstallmentGroup;
     await runAction(target, async () => { for (const item of scheduledCache.filter(row => row.status === 'active' && row.installmentGroupId === groupId)) await deleteDoc(userDoc('scheduled', item.id)); await loadAll(); }, 'Parcelas futuras excluídas');

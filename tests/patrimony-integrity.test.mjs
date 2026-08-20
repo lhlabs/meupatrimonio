@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { positionMetrics } from '../finance-logic.js';
 
-test('patrimônio atual soma posições manuais e aportes realizados, descontando resgates', () => {
+test('patrimônio atual soma ativos e aportes enquanto dívidas ficam informativas', () => {
   const positions = [
     { type: 'asset', value: 10000 },
     { type: 'reserve', value: 20000 },
@@ -21,7 +21,7 @@ test('patrimônio atual soma posições manuais e aportes realizados, descontand
   assert.equal(result.assets, 31200);
   assert.equal(result.reserve, 21200);
   assert.equal(result.debts, 5000);
-  assert.equal(result.netWorth, 26200);
+  assert.equal(result.netWorth, 31200);
 });
 
 test('aporte aumenta a reserva sem duplicar o patrimônio total', () => {

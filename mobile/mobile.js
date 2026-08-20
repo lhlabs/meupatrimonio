@@ -334,7 +334,9 @@ function renderDashboard() {
   const spending = periodSpendingMetrics(projectedTx,recurringCache,now);
   const positions = positionMetrics(positionsCache,txCache,ymd(new Date()),walletsCache,cardsCache,scheduledCache);
   $('#netWorth').textContent = currency.format(positions.netWorth);
-  $('#netWorthDetail').textContent = `${currency.format(positions.assets)} em ativos − ${currency.format(positions.debts)} em dívidas`;
+  const patrimonyKicker = $('#netWorth')?.closest('.hero')?.querySelector('.kicker');
+  if (patrimonyKicker) patrimonyKicker.textContent = 'PATRIMÔNIO';
+  $('#netWorthDetail').textContent = `${currency.format(positions.assets)} em ativos · ${currency.format(positions.debts)} em dívidas (informativo)`;
   const balanceLabel = $('#monthBalance')?.closest('.metric')?.querySelector('span');
   if (balanceLabel) balanceLabel.textContent = metrics.rows.some(item => item.projected === true) ? 'Saldo projetado do mês' : 'Saldo do mês';
   $('#monthBalance').textContent = currency.format(metrics.balance);

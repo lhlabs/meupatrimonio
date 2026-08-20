@@ -38,7 +38,7 @@ test('parcelas futuras permanecem como dívida de cartão até o vencimento', ()
   assert.equal(metric.byCard[0].availableLimit,4400);
 });
 
-test('compra futura registrada já aparece em aberto e consome limite sem antecipar patrimônio', () => {
+test('compra futura registrada aparece em aberto e consome limite sem reduzir patrimônio', () => {
   const cards = [{id:'c1',creditLimit:5000}];
   const wallets = [{id:'w1',initialBalance:1000}];
   const scheduled = [
@@ -54,10 +54,10 @@ test('compra futura registrada já aparece em aberto e consome limite sem anteci
   assert.equal(positionBeforePurchase.netWorth,1000);
   const positionAfterPurchase = positionMetrics([],[],'2026-09-07',wallets,cards,scheduled);
   assert.equal(positionAfterPurchase.cardDebts,600);
-  assert.equal(positionAfterPurchase.netWorth,400);
+  assert.equal(positionAfterPurchase.netWorth,1000);
 });
 
-test('patrimônio integra carteiras e cartão sem saldo duplicado', () => {
+test('patrimônio considera ativos enquanto dívidas ficam apenas informativas', () => {
   const positions = [{type:'asset',value:10000},{type:'debt',value:2000}];
   const wallets = [{id:'w1',initialBalance:5000}];
   const cards = [{id:'c1',creditLimit:5000}];
@@ -67,7 +67,7 @@ test('patrimônio integra carteiras e cartão sem saldo duplicado', () => {
   assert.equal(metric.walletAssets,4000);
   assert.equal(metric.cardDebts,600);
   assert.equal(metric.debts,2600);
-  assert.equal(metric.netWorth,11400);
+  assert.equal(metric.netWorth,14000);
 });
 
 test('compra no dia do fechamento entra na fatura seguinte', () => {
@@ -81,7 +81,7 @@ test('parcelamento legado sem status ainda compõe o valor em aberto', () => {
   assert.equal(metric.byCard[0].availableLimit,750);
 });
 
-test('pagamento de parcela reduz caixa e dívida na mesma quantia sem alterar patrimônio líquido', () => {
+test('pagamento de parcela reduz patrimônio apenas quando o caixa efetivamente sai', () => {
   const wallets = [{id:'w1',initialBalance:1000}];
   const cards = [{id:'c1',creditLimit:5000}];
   const before = positionMetrics([],[],'2026-08-20',wallets,cards,[
@@ -94,8 +94,8 @@ test('pagamento de parcela reduz caixa e dívida na mesma quantia sem alterar pa
     {cardId:'c1',walletId:'w1',status:'posted',amount:300,dueDate:'2026-08-20',purchaseDate:'2026-08-10'},
     {cardId:'c1',walletId:'w1',status:'active',amount:300,dueDate:'2026-09-20',purchaseDate:'2026-08-10'}
   ]);
-  assert.equal(before.netWorth,400);
-  assert.equal(after.netWorth,400);
+  assert.equal(before.netWorth,1000);
+  assert.equal(after.netWorth,700);
   assert.equal(after.walletAssets,700);
   assert.equal(after.cardDebts,300);
 });
@@ -108,3 +108,21 @@ test('fechamento 28 e vencimento 7 atravessam o mês corretamente', () => {
   assert.equal(beforeClose.at(-1).date, '2027-03-07');
   assert.equal(onClose.at(-1).date, '2027-04-07');
 });
+
+test('mês manual da primeira fatura define o início do parcelamento', () => {
+  const schedule = cardInstallmentSchedule({ amount:300, installments:3, purchaseDate:'2026-08-20', closingDay:28, dueDay:7, firstInvoiceMonth:'2026-10' });
+  assert.deepEqual(schedule.map(item => item.date), ['2026-10-07','2026-11-07','2026-12-07']);
+});
+
+test('primeira fatura não pode vencer antes da data da compra', () => {
+  const schedule = cardInstallmentSchedule({ amount:100, installments:1, purchaseDate:'2026-08-20', closingDay:28, dueDay:7, firstInvoiceMonth:'2026-08' });
+  assert.deepEqual(schedule, []);
+});
+
+test('dívida manual permanece informativa e não reduz patrimônio', () => {
+  const metric = positionMetrics([{type:'asset',value:5000},{type:'debt',value:3200}],[],'2026-08-20',[],[],[]);
+  assert.equal(metric.assets,5000);
+  assert.equal(metric.debts,3200);
+  assert.equal(metric.netWorth,5000);
+});
+
