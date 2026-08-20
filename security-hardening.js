@@ -1,8 +1,6 @@
 import { getApps, getApp } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-app.js";
 import {
   getAuth,
-  browserSessionPersistence,
-  setPersistence,
   onAuthStateChanged,
   signOut
 } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-auth.js";
@@ -10,6 +8,8 @@ import {
 const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 const IDLE_STORAGE_KEY = 'mp:last-activity';
 const ACTIVITY_EVENTS = ['pointerdown', 'keydown', 'touchstart', 'scroll'];
+const IS_MOBILE_PWA = typeof window !== 'undefined'
+  && /\/mobile(?:\/|$)/.test(window.location.pathname);
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -18,16 +18,26 @@ async function resolveApp() {
     if (getApps().length) return getApp();
     await sleep(50);
   }
-  throw new Error('Firebase indisponível para a camada de segurança.');
+  throw new Error('Aplicativo indisponível para a camada de segurança.');
 }
 
 function now() {
   return Date.now();
 }
 
+function idleStorage() {
+  try {
+    // O PWA mobile mantém a sessão no dispositivo; por isso o relógio de
+    // inatividade também precisa sobreviver ao fechamento/reabertura do app.
+    return IS_MOBILE_PWA ? window.localStorage : window.sessionStorage;
+  } catch (_) {
+    return null;
+  }
+}
+
 function getLastActivity() {
   try {
-    const stored = Number(sessionStorage.getItem(IDLE_STORAGE_KEY));
+    const stored = Number(idleStorage()?.getItem(IDLE_STORAGE_KEY));
     return Number.isFinite(stored) && stored > 0 ? stored : now();
   } catch (_) {
     return now();
@@ -35,7 +45,12 @@ function getLastActivity() {
 }
 
 function setLastActivity(value = now()) {
-  try { sessionStorage.setItem(IDLE_STORAGE_KEY, String(value)); }
+  try { idleStorage()?.setItem(IDLE_STORAGE_KEY, String(value)); }
+  catch (_) {}
+}
+
+function clearLastActivity() {
+  try { idleStorage()?.removeItem(IDLE_STORAGE_KEY); }
   catch (_) {}
 }
 
@@ -120,11 +135,6 @@ try {
   const app = await resolveApp();
   const auth = getAuth(app);
 
-  // Evita que a credencial continue persistida indefinidamente no dispositivo.
-  // A sessão permanece somente enquanto a sessão do navegador/PWA existir.
-  try { await setPersistence(auth, browserSessionPersistence); }
-  catch (error) { console.warn('Não foi possível reduzir a persistência da sessão.', error); }
-
   let idleTimer = null;
   let currentUser = null;
   let lastActivity = getLastActivity();
@@ -136,8 +146,12 @@ try {
 
   const lockForInactivity = async () => {
     if (!currentUser) return;
-    try { await signOut(auth); }
-    finally { window.location.reload(); }
+    try {
+      await signOut(auth);
+      clearLastActivity();
+    } finally {
+      window.location.reload();
+    }
   };
 
   const scheduleIdleCheck = () => {
@@ -154,7 +168,6 @@ try {
   const markActivity = () => {
     if (!currentUser) return;
     const current = now();
-    // Limita escritas no sessionStorage sem perder precisão relevante.
     if (current - lastActivity < 1000) return;
     lastActivity = current;
     setLastActivity(current);
@@ -171,14 +184,18 @@ try {
     markActivity();
   });
 
-  onAuthStateChanged(auth, nextUser => {
+  onAuthStateChanged(auth, async nextUser => {
     currentUser = nextUser;
     clearIdleTimer();
     if (!nextUser) {
-      try { sessionStorage.removeItem(IDLE_STORAGE_KEY); } catch (_) {}
+      clearLastActivity();
       return;
     }
     lastActivity = getLastActivity();
+    if (now() - lastActivity >= IDLE_TIMEOUT_MS) {
+      await lockForInactivity();
+      return;
+    }
     setLastActivity(lastActivity);
     scheduleIdleCheck();
   });
