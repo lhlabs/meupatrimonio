@@ -49,3 +49,34 @@ test('patrimônio integra carteiras e cartão sem saldo duplicado', () => {
   assert.equal(metric.debts,2600);
   assert.equal(metric.netWorth,11400);
 });
+
+
+test('compra no dia do fechamento entra na fatura seguinte', () => {
+  const schedule = cardInstallmentSchedule({ amount:100, installments:1, purchaseDate:'2026-08-05', closingDay:5, dueDay:12 });
+  assert.deepEqual(schedule.map(item => item.date), ['2026-09-12']);
+});
+
+test('parcelamento legado sem status ainda compõe o valor em aberto', () => {
+  const metric = cardDebtMetrics([{id:'c1',creditLimit:1000}],[],[{cardId:'c1',amount:250,dueDate:'2026-09-12',purchaseDate:'2026-08-10'}],'2026-08-20');
+  assert.equal(metric.total,250);
+  assert.equal(metric.byCard[0].availableLimit,750);
+});
+
+test('pagamento de parcela reduz caixa e dívida na mesma quantia sem alterar patrimônio líquido', () => {
+  const wallets = [{id:'w1',initialBalance:1000}];
+  const cards = [{id:'c1',creditLimit:5000}];
+  const before = positionMetrics([],[],'2026-08-20',wallets,cards,[
+    {cardId:'c1',walletId:'w1',status:'active',amount:300,dueDate:'2026-08-20',purchaseDate:'2026-08-10'},
+    {cardId:'c1',walletId:'w1',status:'active',amount:300,dueDate:'2026-09-20',purchaseDate:'2026-08-10'}
+  ]);
+  const after = positionMetrics([],[
+    {walletId:'w1',cardId:'c1',type:'expense',amount:300,date:'2026-08-20'}
+  ],'2026-08-20',wallets,cards,[
+    {cardId:'c1',walletId:'w1',status:'posted',amount:300,dueDate:'2026-08-20',purchaseDate:'2026-08-10'},
+    {cardId:'c1',walletId:'w1',status:'active',amount:300,dueDate:'2026-09-20',purchaseDate:'2026-08-10'}
+  ]);
+  assert.equal(before.netWorth,400);
+  assert.equal(after.netWorth,400);
+  assert.equal(after.walletAssets,700);
+  assert.equal(after.cardDebts,300);
+});
