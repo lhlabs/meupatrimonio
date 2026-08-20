@@ -3,12 +3,15 @@ name: One-shot month rollover integrity fix
 on:
   push:
     branches: [fix/month-rollover-integrity]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: write
 
 jobs:
   patch-and-test:
+    if: github.event_name == 'push' || github.head_ref == 'fix/month-rollover-integrity'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -188,12 +191,6 @@ test('fechamento 28 e vencimento 7 atravessam o mês corretamente', () => {
           if "meu-patrimonio-v39" not in sw_text:
               raise SystemExit('unexpected root service-worker cache version')
           sw.write_text(sw_text.replace('meu-patrimonio-v39', 'meu-patrimonio-v40', 1))
-
-          msw = Path('mobile/sw.js')
-          msw_text = msw.read_text()
-          if "mp-mobile-v14" not in msw_text:
-              raise SystemExit('unexpected mobile service-worker cache version')
-          msw.write_text(msw_text.replace('mp-mobile-v14', 'mp-mobile-v15', 1))
           PY
       - name: Validate syntax and regression suite
         run: |
@@ -209,6 +206,6 @@ test('fechamento 28 e vencimento 7 atravessam o mês corretamente', () => {
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/workflows/one-shot-month-rollover.yml
-          git add -- app.js tests/card-automation-integrity.test.mjs tests/wallets-cards.test.mjs sw.js mobile/sw.js
+          git add -- app.js tests/card-automation-integrity.test.mjs tests/wallets-cards.test.mjs sw.js
           git commit -m "Corrige virada mensal e roteamento de recorrências"
           git push origin HEAD:fix/month-rollover-integrity
