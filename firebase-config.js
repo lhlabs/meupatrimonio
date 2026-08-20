@@ -4,12 +4,14 @@
 export const firebaseConfig = { provider: 'supabase' };
 export const appCheckSiteKey = '';
 
+const AUTH_BUILD = '20260820c';
+
 if (typeof window !== 'undefined') {
   globalThis.__MP_FIREBASE_CONFIG__ = firebaseConfig;
 
   Promise.allSettled([
-    import('./registration.js'),
-    import('./privacy-controls.js')
+    import(`./registration.js?v=${AUTH_BUILD}`),
+    import(`./privacy-controls.js?v=${AUTH_BUILD}`)
   ]).then(results => {
     results.forEach(result => {
       if (result.status === 'rejected') console.error('Módulo complementar indisponível.', result.reason);
@@ -17,7 +19,7 @@ if (typeof window !== 'undefined') {
   });
 
   const loadSessionHardening = () => {
-    import('./security-hardening.js').catch(error => {
+    import(`./security-hardening.js?v=${AUTH_BUILD}`).catch(error => {
       console.error('Camada de segurança de sessão indisponível.', error);
     });
   };
