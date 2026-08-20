@@ -9,7 +9,7 @@ import {
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-app-check.js";
 import { firebaseConfig, appCheckSiteKey } from "../firebase-config.js";
 import {
-  CONTRIBUTION_CATEGORY, cardDebtMetrics, monthMetrics, periodSpendingMetrics, positionMetrics, safeNumber, walletMetrics, ymd
+  CONTRIBUTION_CATEGORY, cardDebtMetrics, monthMetrics, periodSpendingMetrics, positionMetrics, projectedCardInstallmentRows, safeNumber, walletMetrics, ymd
 } from "../finance-logic.js";
 
 const $ = selector => document.querySelector(selector);
@@ -328,11 +328,15 @@ async function loadData() {
 }
 function renderDashboard() {
   const now = new Date(); now.setDate(1);
-  const metrics = monthMetrics(txCache,now,recurringCache);
-  const spending = periodSpendingMetrics(txCache,recurringCache,now);
+  const projectedCard = projectedCardInstallmentRows(txCache, scheduledCache, now);
+  const projectedTx = projectedCard.length ? [...txCache, ...projectedCard] : txCache;
+  const metrics = monthMetrics(projectedTx,now,recurringCache);
+  const spending = periodSpendingMetrics(projectedTx,recurringCache,now);
   const positions = positionMetrics(positionsCache,txCache,ymd(new Date()),walletsCache,cardsCache,scheduledCache);
   $('#netWorth').textContent = currency.format(positions.netWorth);
   $('#netWorthDetail').textContent = `${currency.format(positions.assets)} em ativos − ${currency.format(positions.debts)} em dívidas`;
+  const balanceLabel = $('#monthBalance')?.closest('.metric')?.querySelector('span');
+  if (balanceLabel) balanceLabel.textContent = metrics.rows.some(item => item.projected === true) ? 'Saldo projetado do mês' : 'Saldo do mês';
   $('#monthBalance').textContent = currency.format(metrics.balance);
   $('#monthIncome').textContent = currency.format(metrics.income);
   $('#monthExpense').textContent = currency.format(spending.totalExpenses);
