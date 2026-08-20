@@ -28,7 +28,8 @@ test('Supabase ativa e força RLS em todas as tabelas financeiras', () => {
     assert.match(schema, new RegExp(`alter table public\\.${sqlName.replace(/["\\]/g, '\\$&')} enable row level security`, 'i'));
     assert.match(schema, new RegExp(`alter table public\\.${sqlName.replace(/["\\]/g, '\\$&')} force row level security`, 'i'));
   }
-  assert.match(schema, /revoke all on table[\s\S]*from anon;/i);
+  assert.match(schema, /revoke all on table[\s\S]*from anon, authenticated;/i);
+  assert.match(schema, /grant select, insert, update, delete on table[\s\S]*to authenticated;/i);
 });
 
 test('RLS limita CRUD ao proprietário autenticado', () => {
@@ -72,6 +73,7 @@ test('Frontend usa somente URL e publishable key do Supabase', () => {
   assert.doesNotMatch(supabaseConfig, /__SUPABASE_(?:URL|PUBLISHABLE_KEY)__/);
   assert.match(supabaseClient, /createClient/);
   assert.match(supabaseClient, /sessionStorage/);
+  assert.match(supabaseClient, /localStorage/);
   assert.doesNotMatch(`${supabaseConfig}\n${supabaseClient}`, /service[_-]?role/i);
   assert.doesNotMatch(`${supabaseConfig}\n${supabaseClient}`, /sb_secret_/i);
 });
