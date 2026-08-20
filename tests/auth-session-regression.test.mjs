@@ -44,3 +44,17 @@ test('service workers bypass stale browser HTTP cache for critical updates', () 
     assert.match(sw, /ignoreSearch:true/);
   }
 });
+
+
+test('web bootstrap uses multi-element selector for forEach handlers', async () => {
+  const appSource = await readFile(new URL('../app.js', import.meta.url), 'utf8');
+  const lines = appSource.split('\n').map(line => line.trim());
+  const closeBad = "$('[data-close-account-dialog]').forEach(button => button.addEventListener('click', () => button.closest('dialog').close()));";
+  const closeGood = "$$('[data-close-account-dialog]').forEach(button => button.addEventListener('click', () => button.closest('dialog').close()));";
+  const typeBad = "$('[data-tx-type]').forEach(button => button.classList.toggle('selected', button.dataset.txType === type));";
+  const typeGood = "$$('[data-tx-type]').forEach(button => button.classList.toggle('selected', button.dataset.txType === type));";
+  assert.equal(lines.includes(closeBad), false);
+  assert.equal(lines.includes(typeBad), false);
+  assert.equal(lines.includes(closeGood), true);
+  assert.equal(lines.includes(typeGood), true);
+});

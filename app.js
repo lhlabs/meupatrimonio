@@ -266,7 +266,7 @@ function installAccountUi() {
   $('#openCardBtn').addEventListener('click', () => openCard());
   $('#walletForm').addEventListener('submit', submitWallet);
   $('#cardForm').addEventListener('submit', submitCard);
-  $('[data-close-account-dialog]').forEach(button => button.addEventListener('click', () => button.closest('dialog').close()));
+  $$('[data-close-account-dialog]').forEach(button => button.addEventListener('click', () => button.closest('dialog').close()));
 }
 
 function openWallet(wallet = null) {
@@ -1194,7 +1194,7 @@ function fillCategories(select, type, current) {
 function setTxType(type, currentCategory) {
   $('#transactionType').value = type;
   fillCategories($('#transactionCategory'), type, currentCategory);
-  $('[data-tx-type]').forEach(button => button.classList.toggle('selected', button.dataset.txType === type));
+  $$('[data-tx-type]').forEach(button => button.classList.toggle('selected', button.dataset.txType === type));
   syncTransactionRouting();
 }
 
