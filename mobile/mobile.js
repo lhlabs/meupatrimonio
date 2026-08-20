@@ -9,7 +9,7 @@ import {
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-app-check.js";
 import { firebaseConfig, appCheckSiteKey } from "../firebase-config.js";
 import {
-  CONTRIBUTION_CATEGORY, cardDebtMetrics, monthMetrics, periodSpendingMetrics, positionMetrics, projectedCardInstallmentRows, safeNumber, walletMetrics, ymd
+  CONTRIBUTION_CATEGORY, cardDebtMetrics, isArchivedTransaction, monthMetrics, periodSpendingMetrics, positionMetrics, projectedCardInstallmentRows, safeNumber, walletMetrics, ymd
 } from "../finance-logic.js";
 
 const $ = selector => document.querySelector(selector);
@@ -362,7 +362,7 @@ function compareTransactions(a,b) {
   return String(b.id || '').localeCompare(String(a.id || ''));
 }
 function renderRecent() {
-  const rows = txCache.slice().sort(compareTransactions).slice(0,8);
+  const rows = txCache.filter(tx => !isArchivedTransaction(tx)).sort(compareTransactions).slice(0,8);
   $('#recentList').innerHTML = rows.length ? rows.map(tx => `
     <div class="recent-row">
       <div class="recent-icon">${tx.type === 'income' ? '+' : '−'}</div>
