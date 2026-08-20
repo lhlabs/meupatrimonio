@@ -28,6 +28,66 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           if [ -f tools/apply-wallets-feature.mjs ]; then
+            python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('tools/apply-wallets-feature.mjs')
+          src = path.read_text()
+
+          def clean(body):
+              # Converte os escapes artificiais usados pelo gerador para código literal
+              # e impede que templates do código gerado sejam avaliados pelo próprio gerador.
+              body = re.sub(r"\$\{\s*'\$\{([^']+)\}'\s*\}", lambda m: r'\${' + m.group(1) + '}', body)
+              body = re.sub(r'(?<!\\)`', r'\`', body)
+              body = re.sub(r'(?<!\\)\$\{', r'\${', body)
+              return body
+
+          def sanitize_region(start_marker, end_marker):
+              global src
+              start = src.find(start_marker)
+              if start < 0:
+                  raise SystemExit(f'marcador inicial não encontrado: {start_marker[:60]}')
+              start += len(start_marker)
+              end = src.find(end_marker, start)
+              if end < 0:
+                  raise SystemExit(f'marcador final não encontrado: {end_marker[:60]}')
+              src = src[:start] + clean(src[start:end]) + src[end:]
+
+          def sanitize_labeled(anchor, label):
+              global src
+              pos = src.find(anchor)
+              if pos < 0:
+                  raise SystemExit(f'âncora não encontrada: {anchor[:60]}')
+              start = src.find('`', pos)
+              if start < 0:
+                  raise SystemExit(f'template não encontrado após: {anchor[:60]}')
+              marker = f"`, '{label}');"
+              end = src.find(marker, start + 1)
+              if end < 0:
+                  raise SystemExit(f'fechamento não encontrado para: {label}')
+              src = src[:start + 1] + clean(src[start + 1:end]) + src[end:]
+
+          sanitize_region("  const accountUi = `", "\n`;\n  text = replaceOnce(text, `function installTransactionPeriodFilter() {`")
+          sanitize_labeled("text = replaceRegex(text, /async function loadAll", "load all accounts")
+          sanitize_labeled("text = replaceRegex(text, /function txRow", "transaction row labels")
+          sanitize_labeled("text = replaceRegex(text, /function renderAgenda", "agenda installment grouping")
+          sanitize_labeled("text = replaceRegex(text, /function renderPositions", "debt composition rendering")
+          sanitize_labeled("text = replaceRegex(text, /function openTransaction", "open transaction routes")
+          sanitize_labeled("text = replaceRegex(text, /function openPosition", "open debt position")
+          sanitize_labeled("text = replaceRegex(text, /\\$\\('#transactionForm'", "transaction submit wallet/card")
+          sanitize_labeled("text = replaceRegex(text, /\\$\\('#positionForm'", "position debt submit")
+          sanitize_labeled("text = replaceRegex(text, /async function loadData", "mobile load accounts")
+
+          # Dois replaces curtos contêm template literal dentro do template do gerador.
+          src = src.replace(
+              "${walletsCache.find(w => w.id === tx.walletId) ? ` · ${esc(walletsCache.find(w => w.id === tx.walletId).name)}` : ''}",
+              r"\${walletsCache.find(w => w.id === tx.walletId) ? \` · \${esc(walletsCache.find(w => w.id === tx.walletId).name)}\` : ''}"
+          )
+
+          path.write_text(src)
+          PY
+            node --check tools/apply-wallets-feature.mjs
             node tools/apply-wallets-feature.mjs
             rm -f tools/apply-wallets-feature.mjs .github/workflows/apply-wallets-feature.yml .wallet-feature-trigger
             git fetch origin main --depth=1
