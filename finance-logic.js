@@ -43,6 +43,10 @@ export function isWithdrawal(item) {
     && norm(item.category) === norm(WITHDRAWAL_CATEGORY);
 }
 
+export function isArchivedTransaction(item) {
+  return item?.archived === true;
+}
+
 export function isVariableConsumption(item) {
   if (!item || item.type !== 'expense' || isContribution(item)) return false;
   return !['recurring', 'scheduled'].includes(item.sourceType);
@@ -50,7 +54,7 @@ export function isVariableConsumption(item) {
 
 export function monthRows(transactions, date) {
   const key = monthKey(date);
-  return transactions.filter(item => String(item?.date || '').startsWith(key));
+  return transactions.filter(item => !isArchivedTransaction(item) && String(item?.date || '').startsWith(key));
 }
 
 export function contributionBalance(transactions, throughDate = null) {
@@ -111,7 +115,7 @@ export function cardInstallmentSchedule({ amount, installments, purchaseDate, cl
 export function walletMetrics(wallets = [], cards = [], transactions = [], throughDate = ymd(new Date())) {
   void cards;
   const byWallet = wallets.map(wallet => {
-    const movements = transactions.filter(item => item?.walletId === wallet.id && (!throughDate || String(item.date || '') <= throughDate));
+    const movements = transactions.filter(item => !isArchivedTransaction(item) && item?.walletId === wallet.id && (!throughDate || String(item.date || '') <= throughDate));
     const movementBalance = movements.reduce((sum, item) => {
       const amount = safeNumber(item.amount);
       return sum + (item.type === 'income' ? amount : item.type === 'expense' ? -amount : 0);

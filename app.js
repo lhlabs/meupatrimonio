@@ -11,7 +11,7 @@ import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gst
 import { firebaseConfig, appCheckSiteKey } from "./firebase-config.js";
 import {
   CONTRIBUTION_CATEGORY, WITHDRAWAL_CATEGORY, addYear, cardDebtMetrics, cardInstallmentSchedule, clamp, contributionBalance,
-  isContribution, isWithdrawal, monthKey, monthMetrics, monthlySpendingGoal,
+  isArchivedTransaction, isContribution, isWithdrawal, monthKey, monthMetrics, monthlySpendingGoal,
   nextRecurringDue, periodSpendingMetrics, positionMetrics, projectFutureValue,
   recurringDue, reserveMetrics, safeNumber, scoreMetrics, shouldMaterializeRecurring, walletMetrics, ymd
 } from "./finance-logic.js";
@@ -1081,7 +1081,7 @@ function renderTransactions() {
   const search = $('#txSearch').value.trim().toLowerCase();
   const dateFrom = $('#txDateFrom')?.value || '';
   const dateTo = $('#txDateTo')?.value || '';
-  let list = txCache.slice().sort((a,b) => String(b.date).localeCompare(String(a.date)));
+  let list = txCache.filter(tx => !isArchivedTransaction(tx)).sort((a,b) => String(b.date).localeCompare(String(a.date)));
   if (!dateFrom && !dateTo) list = metricsForMonth(selectedMonth).rows.slice().sort((a,b) => String(b.date).localeCompare(String(a.date)));
   if (dateFrom) list = list.filter(tx => String(tx.date || '') >= dateFrom);
   if (dateTo) list = list.filter(tx => String(tx.date || '') <= dateTo);
@@ -1713,7 +1713,18 @@ document.addEventListener('click', async event => {
   if (target.dataset.editPosition) return openPosition(positionsCache.find(item => item.id === target.dataset.editPosition));
   if (target.dataset.editRec) return openRecurring(recurringCache.find(item => item.id === target.dataset.editRec));
   if (target.dataset.editSch) return openScheduled(scheduledCache.find(item => item.id === target.dataset.editSch));
-  if (target.dataset.deleteTx && confirm('Excluir este lançamento?')) await runAction(target, async () => { await deleteDoc(userDoc('transactions', target.dataset.deleteTx)); await loadAll(); }, 'Lançamento excluído');
+  if (target.dataset.deleteTx && confirm('Excluir este lançamento?')) {
+    const transactionId = target.dataset.deleteTx;
+    const transaction = txCache.find(item => item.id === transactionId);
+    await runAction(target, async () => {
+      if (isWithdrawal(transaction)) {
+        await updateDoc(userDoc('transactions', transactionId), { archived:true, walletId:null, cardId:null });
+      } else {
+        await deleteDoc(userDoc('transactions', transactionId));
+      }
+      await loadAll();
+    }, 'Lançamento excluído');
+  }
   if (target.dataset.deletePosition && confirm('Excluir esta posição?')) await runAction(target, async () => { await deleteDoc(userDoc('positions', target.dataset.deletePosition)); await loadAll(); }, 'Posição excluída');
   if (target.dataset.delRec && confirm('Excluir esta recorrência? Os lançamentos já realizados permanecerão no histórico.')) await runAction(target, async () => { await deleteDoc(userDoc('recurring', target.dataset.delRec)); await loadAll(); }, 'Recorrência excluída');
   if (target.dataset.delSch && confirm('Excluir esta conta agendada? Os lançamentos já realizados permanecerão no histórico.')) await runAction(target, async () => { await deleteDoc(userDoc('scheduled', target.dataset.delSch)); await loadAll(); }, 'Agendamento excluído');
@@ -1752,7 +1763,7 @@ function exportExcel() {
       ['Dívidas', positions.debts],
       ['Patrimônio líquido', positions.netWorth]
     ]),
-    sheetXml('Lançamentos',['Data','Tipo','Categoria','Descrição','Valor','Origem','Carteira','Cartão','Parcela'],txCache.map(tx => [tx.date,tx.type,tx.category,tx.description || '',safeNumber(tx.amount),tx.sourceType || 'manual',walletById(tx.walletId)?.name || '',cardById(tx.cardId)?.name || '',tx.installmentTotal ? `${tx.installmentNumber}/${tx.installmentTotal}` : ''])),
+    sheetXml('Lançamentos',['Data','Tipo','Categoria','Descrição','Valor','Origem','Carteira','Cartão','Parcela'],txCache.filter(tx => !isArchivedTransaction(tx)).map(tx => [tx.date,tx.type,tx.category,tx.description || '',safeNumber(tx.amount),tx.sourceType || 'manual',walletById(tx.walletId)?.name || '',cardById(tx.cardId)?.name || '',tx.installmentTotal ? `${tx.installmentNumber}/${tx.installmentTotal}` : ''])),
     sheetXml('Carteiras',['Instituição','Nome','Tipo','Saldo inicial','Saldo atual','Status'],walletRows),
     sheetXml('Cartões',['Instituição','Nome','Limite','Em aberto','Próxima fatura','Limite disponível','Fechamento','Vencimento','Carteira pagadora','Status'],cardRows),
     sheetXml('Patrimônio',['Tipo','Nome','Valor atual','Composição','Instituição','Valor original','Parcela','Total parcelas','Pagas','Juros a.a.','Vencimento','Observações'],positionRows),
