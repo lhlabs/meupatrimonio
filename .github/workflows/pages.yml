@@ -25,7 +25,9 @@ jobs:
           node-version: '24'
           package-manager-cache: false
       - name: Apply focused changes
-        run: python .github/apply-patrimony-card-edit.py
+        run: |
+          python .github/apply-patrimony-card-edit.py
+          python .github/update-patrimony-integrity-test.py
       - name: Validate JavaScript syntax
         run: |
           node --check app.js
@@ -40,6 +42,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- finance-logic.js app.js mobile/mobile.js tests/wallets-cards.test.mjs sw.js mobile/sw.js
+          git add -- finance-logic.js app.js mobile/mobile.js tests/wallets-cards.test.mjs tests/patrimony-integrity.test.mjs sw.js mobile/sw.js
           git commit -m "Ajusta patrimônio e edição de compras no cartão"
           git push origin HEAD:fix/patrimony-card-edit
