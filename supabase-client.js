@@ -5,8 +5,14 @@ if (!hasSupabaseConfig()) {
   throw new Error('Configuração do Supabase ainda não foi preenchida.');
 }
 
-const storage = typeof window !== 'undefined' && window.sessionStorage
-  ? window.sessionStorage
+const isMobilePwa = typeof window !== 'undefined'
+  && /\/mobile(?:\/|$)/.test(window.location.pathname);
+
+// Preserva a política anterior do aplicativo:
+// - web completa: sessão apenas na aba/sessão do navegador;
+// - PWA mobile: login persistente no dispositivo, como no Firebase.
+const storage = typeof window !== 'undefined'
+  ? (isMobilePwa ? window.localStorage : window.sessionStorage)
   : undefined;
 
 export const supabase = createClient(supabaseUrl, supabasePublishableKey, {
