@@ -1350,6 +1350,16 @@ function openInstallmentGroup(groupId) {
   $('#transactionInstallments').value = String(active.length);
   $('#transactionFirstInvoiceMonth').value = String(sample.dueDate || '').slice(0, 7);
   $('#transactionFirstInvoiceMonth').dataset.manual = 'true';
+  if (hasPosted) {
+    const lastPostedMonth = String(posted.at(-1)?.date || '').slice(0, 7);
+    const lastPostedDate = dateFromMonthKey(lastPostedMonth);
+    if (lastPostedDate) {
+      lastPostedDate.setMonth(lastPostedDate.getMonth() + 1);
+      $('#transactionFirstInvoiceMonth').min = monthKey(lastPostedDate);
+    }
+  } else {
+    $('#transactionFirstInvoiceMonth').min = String(sample.purchaseDate || '').slice(0, 7);
+  }
   const invoiceLabel = $('#transactionFirstInvoiceLabel');
   if (invoiceLabel?.childNodes[0]) invoiceLabel.childNodes[0].textContent = hasPosted ? 'Mês da próxima fatura' : 'Mês da primeira fatura';
   $('#transactionRoute').disabled = true;
@@ -1378,13 +1388,16 @@ async function saveInstallmentGroupEdit(groupId, { amount, category, description
   if (hasPosted && (card.id !== sample.cardId || purchaseDate !== sample.purchaseDate)) throw new Error('Cartão e data da compra não podem mudar após uma parcela realizada');
   const schedule = cardInstallmentSchedule({ amount, installments, purchaseDate, closingDay:card.closingDay, dueDay:card.dueDay, firstInvoiceMonth });
   if (schedule.length !== installments) throw new Error('A primeira fatura não pode vencer antes da compra e o valor deve comportar as parcelas');
+  const lastPostedDate = posted.at(-1)?.date || '';
+  if (hasPosted && schedule[0]?.date <= lastPostedDate) throw new Error('A próxima fatura deve ser posterior à última parcela já realizada');
   const existingNumbers = active.map(item => Math.trunc(safeNumber(item.installmentNumber))).filter(Boolean);
   const totalInstallments = hasPosted ? Math.trunc(safeNumber(sample.installmentTotal) || (posted.length + active.length)) : installments;
-  for (const item of active) await deleteDoc(userDoc('scheduled', item.id));
+  const nextIds = new Set();
   for (let index = 0; index < schedule.length; index += 1) {
     const part = schedule[index];
     const installmentNumber = hasPosted ? (existingNumbers[index] || posted.length + index + 1) : part.installmentNumber;
     const scheduledId = `inst_${groupId}_${String(installmentNumber).padStart(3,'0')}`;
+    nextIds.add(scheduledId);
     await setDoc(userDoc('scheduled', scheduledId), {
       name: `${description || category} · ${installmentNumber}/${totalInstallments}`,
       type:'expense', amount:part.amount, category, description:description || category,
@@ -1393,6 +1406,9 @@ async function saveInstallmentGroupEdit(groupId, { amount, category, description
       installmentGroupId:groupId, installmentNumber, installmentTotal:totalInstallments,
       createdAt:serverTimestamp(), updatedAt:serverTimestamp()
     });
+  }
+  for (const item of active) {
+    if (!nextIds.has(item.id)) await deleteDoc(userDoc('scheduled', item.id));
   }
 }
 

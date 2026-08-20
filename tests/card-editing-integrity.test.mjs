@@ -19,3 +19,15 @@ test('first invoice choice is represented by due dates without adding an unsuppo
   assert.doesNotMatch(app, /purchaseDate:date, firstInvoiceMonth/);
   assert.doesNotMatch(app, /firstInvoiceMonth, installmentGroupId/);
 });
+
+test('posted installments cannot be moved back onto an already realized invoice', () => {
+  assert.match(app, /schedule\[0\]\?\.date <= lastPostedDate/);
+  assert.match(app, /A próxima fatura deve ser posterior à última parcela já realizada/);
+});
+
+test('editing writes replacement installments before deleting obsolete future rows', () => {
+  const write = app.indexOf('const nextIds = new Set()');
+  const cleanup = app.indexOf("if (!nextIds.has(item.id)) await deleteDoc");
+  assert.ok(write >= 0 && cleanup > write);
+});
+
