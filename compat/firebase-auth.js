@@ -48,8 +48,12 @@ const authFacade = {
 };
 
 async function refreshCurrentUser() {
+  const observedUser = rawUser;
   const { data, error } = await supabase.auth.getUser();
   if (error && !String(error.message || '').toLowerCase().includes('session')) throw normalizeError(error);
+  // Não deixa uma leitura iniciada antes do login sobrescrever um usuário
+  // que tenha sido autenticado enquanto a requisição estava em andamento.
+  if (rawUser !== observedUser) return mapUser(rawUser);
   rawUser = data?.user || null;
   return mapUser(rawUser);
 }
@@ -114,6 +118,7 @@ export function onAuthStateChanged(_auth, callback) {
   let active = true;
   let delivered = false;
   let deliveredUid = undefined;
+  let authEventSeen = false;
 
   const deliver = user => {
     if (!active) return;
@@ -126,17 +131,29 @@ export function onAuthStateChanged(_auth, callback) {
   };
 
   supabase.auth.getSession().then(({ data }) => {
+    // Se um evento de Auth já chegou, o snapshot inicial ficou obsoleto.
+    if (!active || authEventSeen) return;
     rawUser = data?.session?.user || null;
     deliver(rawUser);
   }).catch(() => {
+    if (!active || authEventSeen) return;
     rawUser = null;
     deliver(null);
   });
 
-  const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
-    rawUser = session?.user || null;
-    if (event === 'PASSWORD_RECOVERY') await handlePasswordRecovery();
-    deliver(rawUser);
+  const { data } = supabase.auth.onAuthStateChange((event, session) => {
+    authEventSeen = true;
+    const eventUser = session?.user || null;
+    rawUser = eventUser;
+
+    // Não execute callbacks da aplicação dentro do callback do Supabase Auth.
+    // Chamadas assíncronas ao mesmo cliente nesse contexto podem bloquear o
+    // próximo request (deadlock). O próximo macrotask encerra o lock do Auth.
+    setTimeout(() => {
+      if (!active) return;
+      deliver(eventUser);
+      if (event === 'PASSWORD_RECOVERY') void handlePasswordRecovery();
+    }, 0);
   });
 
   return () => {
