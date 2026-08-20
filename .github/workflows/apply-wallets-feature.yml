@@ -1,0 +1,28 @@
+name: Apply wallets feature patch
+
+on:
+  push:
+    branches: [feature/wallets-cards-debts]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: feature/wallets-cards-debts
+      - name: Apply deterministic patch
+        run: node tools/apply-wallets-feature.mjs
+      - name: Remove one-off patch machinery and commit result
+        run: |
+          rm -f tools/apply-wallets-feature.mjs .github/workflows/apply-wallets-feature.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: add wallets cards installments and debt composition [wallet-patch-applied]"
+          git push origin HEAD:feature/wallets-cards-debts
