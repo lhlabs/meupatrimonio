@@ -117,9 +117,11 @@ export function cardDebtMetrics(cards = [], transactions = [], scheduled = [], t
   const byCard = cards.map(card => {
     const pending = scheduled
       .filter(item => item?.cardId === card.id && (item.status == null || item.status === 'active'))
-      .filter(item => !item.purchaseDate || !throughDate || String(item.purchaseDate) <= throughDate)
       .sort((a, b) => String(a.dueDate || '').localeCompare(String(b.dueDate || '')));
+    const incurred = pending
+      .filter(item => !item.purchaseDate || !throughDate || String(item.purchaseDate) <= throughDate);
     const open = pending.reduce((sum, item) => sum + safeNumber(item.amount), 0);
+    const incurredOpen = incurred.reduce((sum, item) => sum + safeNumber(item.amount), 0);
     const nextDue = pending[0]?.dueDate || '';
     const nextMonth = String(nextDue).slice(0, 7);
     const nextInvoice = nextMonth
@@ -128,12 +130,17 @@ export function cardDebtMetrics(cards = [], transactions = [], scheduled = [], t
     return {
       ...card,
       open,
+      incurredOpen,
       nextDue,
       nextInvoice,
       availableLimit: Math.max(0, safeNumber(card.creditLimit) - open)
     };
   });
-  return { byCard, total: byCard.reduce((sum, item) => sum + safeNumber(item.open), 0) };
+  return {
+    byCard,
+    total: byCard.reduce((sum, item) => sum + safeNumber(item.open), 0),
+    incurredTotal: byCard.reduce((sum, item) => sum + safeNumber(item.incurredOpen), 0)
+  };
 }
 
 export function positionMetrics(positions = [], transactions = [], throughDate = ymd(new Date()), wallets = [], cards = [], scheduled = []) {
@@ -148,7 +155,7 @@ export function positionMetrics(positions = [], transactions = [], throughDate =
     .reduce((sum, item) => sum + safeNumber(item.value), 0);
   const contributionAssets = contributionBalance(transactions, throughDate);
   const walletAssets = walletMetrics(wallets, cards, transactions, throughDate).total;
-  const cardDebts = cardDebtMetrics(cards, transactions, scheduled, throughDate).total;
+  const cardDebts = cardDebtMetrics(cards, transactions, scheduled, throughDate).incurredTotal;
   const assets = manualAssets + contributionAssets + walletAssets;
   const reserve = manualReserve + contributionAssets;
   const debts = manualDebts + cardDebts;
