@@ -5,104 +5,136 @@ revoke all on schema private from public, anon, authenticated;
 
 create table if not exists public.transactions (
   user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
-  id text not null,
-  type text not null check (type in ('income','expense')),
-  amount numeric not null check (amount > 0 and amount < 100000000),
+  id text not null default gen_random_uuid()::text,
+  type text not null,
+  amount numeric not null,
   category text not null,
-  description text not null default '' check (char_length(description) <= 80),
-  date text not null check (date ~ '^\d{4}-\d{2}-\d{2}$'),
+  description text not null,
+  date text not null,
   recurring boolean not null default false,
   "sourceType" text,
   "sourceId" text,
   "createdAt" timestamptz not null default now(),
   primary key (user_id, id),
-  constraint transactions_id_valid check (id ~ '^[A-Za-z0-9_-]{1,160}$'),
-  constraint transactions_source_id_valid check ("sourceId" is null or "sourceId" ~ '^[A-Za-z0-9_-]{1,160}$'),
-  constraint transactions_source_type_valid check ("sourceType" is null or "sourceType" in ('recurring','scheduled','contribution','withdrawal')),
+  constraint transactions_type_valid check (type in ('income','expense')),
+  constraint transactions_amount_valid check (amount > 0 and amount < 100000000),
   constraint transactions_category_valid check (
-    (type = 'expense' and category in ('Moradia','Alimentação','Transporte','Saúde','Educação','Lazer','Assinaturas','Academia','Investimentos/Aportes','Outros'))
+    (type = 'expense' and category in ('Moradia','Mercado','Restaurantes','Transporte','Veículo','Saúde','Academia','Pets','Assinaturas','Lazer','Compras','Impostos','Seguros','Educação','Viagens','Investimentos/Aportes','Outros'))
     or
-    (type = 'income' and category in ('Salário','Renda extra','Investimentos','Resgate de Patrimônio','Outros'))
-  )
+    (type = 'income' and category in ('Salário','Benefícios','Renda extra','Investimentos','Reembolso','Venda','Outros','Resgate de Patrimônio'))
+  ),
+  constraint transactions_description_valid check (char_length(description) <= 80),
+  constraint transactions_date_valid check (date ~ '^\d{4}-\d{2}-\d{2}$'),
+  constraint transactions_id_valid check (id ~ '^[A-Za-z0-9_-]{1,160}$'),
+  constraint transactions_source_id_valid check ("sourceId" is null or char_length("sourceId") <= 128),
+  constraint transactions_source_type_valid check ("sourceType" is null or "sourceType" in ('recurring','scheduled'))
 );
 
 create table if not exists public.positions (
   user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
-  id text not null,
-  type text not null check (type in ('asset','reserve','debt')),
-  name text not null check (char_length(name) between 1 and 60),
-  value numeric not null check (value >= 0 and value < 1000000000),
+  id text not null default gen_random_uuid()::text,
+  type text not null,
+  name text not null,
+  value numeric not null,
   "createdAt" timestamptz not null default now(),
   primary key (user_id, id),
+  constraint positions_type_valid check (type in ('asset','reserve','debt')),
+  constraint positions_name_valid check (char_length(name) between 1 and 60),
+  constraint positions_value_valid check (value >= 0 and value < 1000000000),
   constraint positions_id_valid check (id ~ '^[A-Za-z0-9_-]{1,160}$')
 );
 
 create table if not exists public.planning (
   user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
-  "monthlyContributionGoal" numeric not null default 0 check ("monthlyContributionGoal" >= 0 and "monthlyContributionGoal" < 100000000),
-  "monthlySurplusGoal" numeric not null default 0 check ("monthlySurplusGoal" >= 0 and "monthlySurplusGoal" < 100000000),
-  "dailySpendGoal" numeric not null default 0 check ("dailySpendGoal" >= 0 and "dailySpendGoal" < 100000000),
-  "financialFreedomMonthlyCost" numeric not null default 0 check ("financialFreedomMonthlyCost" >= 0 and "financialFreedomMonthlyCost" < 100000000),
-  "realReturn" numeric not null default 5 check ("realReturn" between 0 and 20),
-  "reserveTargetMonths" integer not null default 6 check ("reserveTargetMonths" between 1 and 24),
+  "monthlyContributionGoal" numeric not null default 0,
+  "monthlySurplusGoal" numeric not null default 0,
+  "dailySpendGoal" numeric not null default 0,
+  "financialFreedomMonthlyCost" numeric not null default 0,
+  "realReturn" numeric not null default 5,
+  "reserveTargetMonths" integer not null default 6,
   "updatedAt" timestamptz not null default now(),
-  primary key (user_id)
+  primary key (user_id),
+  constraint planning_contribution_valid check ("monthlyContributionGoal" >= 0 and "monthlyContributionGoal" < 1000000000),
+  constraint planning_surplus_valid check ("monthlySurplusGoal" >= 0 and "monthlySurplusGoal" < 1000000000),
+  constraint planning_spend_valid check ("dailySpendGoal" >= 0 and "dailySpendGoal" < 1000000000),
+  constraint planning_freedom_valid check ("financialFreedomMonthlyCost" >= 0 and "financialFreedomMonthlyCost" < 1000000000),
+  constraint planning_return_valid check ("realReturn" between 0 and 20),
+  constraint planning_reserve_months_valid check ("reserveTargetMonths" between 1 and 24)
 );
 
 create table if not exists public."monthlyGoals" (
   user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   id text not null,
-  "month" text not null check ("month" ~ '^\d{4}-\d{2}$'),
-  "contributionGoal" numeric not null default 0 check ("contributionGoal" >= 0 and "contributionGoal" < 100000000),
-  "surplusGoal" numeric not null default 0 check ("surplusGoal" >= 0 and "surplusGoal" < 100000000),
-  "dailySpendGoal" numeric not null default 0 check ("dailySpendGoal" >= 0 and "dailySpendGoal" < 100000000),
+  "month" text not null,
+  "monthlySurplusGoal" numeric not null default 0,
+  "dailySpendGoal" numeric not null default 0,
   "createdAt" timestamptz not null default now(),
   "updatedAt" timestamptz not null default now(),
   primary key (user_id, id),
-  constraint monthly_goals_id_valid check (id ~ '^[A-Za-z0-9_-]{1,160}$')
+  constraint monthly_goals_id_valid check (id ~ '^\d{4}-\d{2}$'),
+  constraint monthly_goals_month_valid check ("month" ~ '^\d{4}-\d{2}$'),
+  constraint monthly_goals_id_matches_month check (id = "month"),
+  constraint monthly_goals_surplus_valid check ("monthlySurplusGoal" >= 0 and "monthlySurplusGoal" < 1000000000),
+  constraint monthly_goals_spend_valid check ("dailySpendGoal" >= 0 and "dailySpendGoal" < 1000000000)
 );
 
 create table if not exists public.recurring (
   user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
-  id text not null,
-  name text not null check (char_length(name) between 1 and 60),
-  type text not null check (type in ('income','expense')),
-  amount numeric not null check (amount > 0 and amount < 100000000),
+  id text not null default gen_random_uuid()::text,
+  name text not null,
+  type text not null,
+  amount numeric not null,
   category text not null,
-  day integer not null check (day between 1 and 31),
-  "startDate" text not null check ("startDate" ~ '^\d{4}-\d{2}-\d{2}$'),
-  "endDate" text check ("endDate" is null or "endDate" = '' or "endDate" ~ '^\d{4}-\d{2}-\d{2}$'),
+  description text not null,
+  "dayOfMonth" integer not null,
+  "startDate" text not null,
+  "endDate" text not null default '',
   active boolean not null default true,
   "createdAt" timestamptz not null default now(),
   "updatedAt" timestamptz not null default now(),
   primary key (user_id, id),
   constraint recurring_id_valid check (id ~ '^[A-Za-z0-9_-]{1,160}$'),
+  constraint recurring_name_valid check (char_length(name) between 1 and 60),
+  constraint recurring_type_valid check (type in ('income','expense')),
+  constraint recurring_amount_valid check (amount > 0 and amount < 100000000),
   constraint recurring_category_valid check (
-    (type = 'expense' and category in ('Moradia','Alimentação','Transporte','Saúde','Educação','Lazer','Assinaturas','Academia','Investimentos/Aportes','Outros'))
+    (type = 'expense' and category in ('Moradia','Mercado','Restaurantes','Transporte','Veículo','Saúde','Academia','Pets','Assinaturas','Lazer','Compras','Impostos','Seguros','Educação','Viagens','Investimentos/Aportes','Outros'))
     or
-    (type = 'income' and category in ('Salário','Renda extra','Investimentos','Resgate de Patrimônio','Outros'))
-  )
+    (type = 'income' and category in ('Salário','Benefícios','Renda extra','Investimentos','Reembolso','Venda','Outros'))
+  ),
+  constraint recurring_description_valid check (char_length(description) <= 80),
+  constraint recurring_day_valid check ("dayOfMonth" between 1 and 31),
+  constraint recurring_start_date_valid check ("startDate" ~ '^\d{4}-\d{2}-\d{2}$'),
+  constraint recurring_end_date_valid check ("endDate" = '' or "endDate" ~ '^\d{4}-\d{2}-\d{2}$')
 );
 
 create table if not exists public.scheduled (
   user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
-  id text not null,
-  name text not null check (char_length(name) between 1 and 60),
-  type text not null check (type in ('income','expense')),
-  amount numeric not null check (amount > 0 and amount < 100000000),
+  id text not null default gen_random_uuid()::text,
+  name text not null,
+  type text not null,
+  amount numeric not null,
   category text not null,
-  "dueDate" text not null check ("dueDate" ~ '^\d{4}-\d{2}-\d{2}$'),
-  frequency text not null default 'once' check (frequency in ('once','annual')),
-  status text not null default 'pending' check (status in ('pending','posted')),
+  description text not null,
+  "dueDate" text not null,
+  frequency text not null,
+  status text not null default 'active',
   "createdAt" timestamptz not null default now(),
   "updatedAt" timestamptz not null default now(),
   primary key (user_id, id),
   constraint scheduled_id_valid check (id ~ '^[A-Za-z0-9_-]{1,160}$'),
+  constraint scheduled_name_valid check (char_length(name) between 1 and 60),
+  constraint scheduled_type_valid check (type in ('income','expense')),
+  constraint scheduled_amount_valid check (amount > 0 and amount < 100000000),
   constraint scheduled_category_valid check (
-    (type = 'expense' and category in ('Moradia','Alimentação','Transporte','Saúde','Educação','Lazer','Assinaturas','Academia','Investimentos/Aportes','Outros'))
+    (type = 'expense' and category in ('Moradia','Mercado','Restaurantes','Transporte','Veículo','Saúde','Academia','Pets','Assinaturas','Lazer','Compras','Impostos','Seguros','Educação','Viagens','Investimentos/Aportes','Outros'))
     or
-    (type = 'income' and category in ('Salário','Renda extra','Investimentos','Resgate de Patrimônio','Outros'))
-  )
+    (type = 'income' and category in ('Salário','Benefícios','Renda extra','Investimentos','Reembolso','Venda','Outros'))
+  ),
+  constraint scheduled_description_valid check (char_length(description) <= 80),
+  constraint scheduled_due_date_valid check ("dueDate" ~ '^\d{4}-\d{2}-\d{2}$'),
+  constraint scheduled_frequency_valid check (frequency in ('once','annual')),
+  constraint scheduled_status_valid check (status in ('active','posted','cancelled'))
 );
 
 create index if not exists transactions_user_date_idx on public.transactions(user_id, date);
@@ -188,10 +220,6 @@ alter table public."monthlyGoals" force row level security;
 alter table public.recurring force row level security;
 alter table public.scheduled force row level security;
 
--- Supabase concede privilégios padrão amplos em tabelas do schema public.
--- Revogamos primeiro de anon e authenticated; depois devolvemos somente CRUD.
--- RLS continua sendo a camada de autorização por linha, enquanto esta camada
--- impede operações estruturais como TRUNCATE que não são filtradas por RLS.
 revoke all on table public.transactions, public.positions, public.planning, public."monthlyGoals", public.recurring, public.scheduled from anon, authenticated;
 grant select, insert, update, delete on table public.transactions, public.positions, public.planning, public."monthlyGoals", public.recurring, public.scheduled to authenticated;
 
