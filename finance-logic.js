@@ -71,7 +71,7 @@ export function splitInstallmentAmounts(amount, installments) {
   return Array.from({ length: count }, (_, index) => (base + (index < remainder ? 1 : 0)) / 100);
 }
 
-export function cardInstallmentSchedule({ amount, installments, purchaseDate, closingDay, dueDay }) {
+export function cardInstallmentSchedule({ amount, installments, purchaseDate, closingDay, dueDay, firstInvoiceMonth = '' }) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(purchaseDate || ''));
   if (!match) return [];
   const year = Number(match[1]), month = Number(match[2]), day = Number(match[3]);
@@ -81,10 +81,22 @@ export function cardInstallmentSchedule({ amount, installments, purchaseDate, cl
   const due = Math.max(1, Math.min(31, Math.trunc(safeNumber(dueDay) || 1)));
   const amounts = splitInstallmentAmounts(amount, installments);
   if (!amounts.length) return [];
-  const closingDate = dueDateFor(year, month - 1, close);
-  const statementMonth = new Date(year, month - 1 + (String(purchaseDate) >= closingDate ? 1 : 0), 1, 12);
-  const firstDueMonth = new Date(statementMonth);
-  if (due <= close) firstDueMonth.setMonth(firstDueMonth.getMonth() + 1);
+  let firstDueMonth;
+  const manualInvoiceMonth = String(firstInvoiceMonth || '');
+  if (manualInvoiceMonth) {
+    const invoiceMatch = /^(\d{4})-(\d{2})$/.exec(manualInvoiceMonth);
+    if (!invoiceMatch) return [];
+    const invoiceYear = Number(invoiceMatch[1]), invoiceMonth = Number(invoiceMatch[2]);
+    if (invoiceMonth < 1 || invoiceMonth > 12) return [];
+    firstDueMonth = new Date(invoiceYear, invoiceMonth - 1, 1, 12);
+    const firstDueDate = dueDateFor(invoiceYear, invoiceMonth - 1, due);
+    if (firstDueDate < String(purchaseDate)) return [];
+  } else {
+    const closingDate = dueDateFor(year, month - 1, close);
+    const statementMonth = new Date(year, month - 1 + (String(purchaseDate) >= closingDate ? 1 : 0), 1, 12);
+    firstDueMonth = new Date(statementMonth);
+    if (due <= close) firstDueMonth.setMonth(firstDueMonth.getMonth() + 1);
+  }
   return amounts.map((installmentAmount, index) => {
     const cursor = new Date(firstDueMonth.getFullYear(), firstDueMonth.getMonth() + index, 1, 12);
     return {
@@ -169,7 +181,7 @@ export function positionMetrics(positions = [], transactions = [], throughDate =
     assets,
     reserve,
     debts,
-    netWorth: assets - debts
+    netWorth: assets
   };
 }
 
