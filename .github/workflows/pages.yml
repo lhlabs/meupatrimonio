@@ -36,8 +36,6 @@ jobs:
           src = path.read_text()
 
           def clean(body):
-              # Converte os escapes artificiais usados pelo gerador para código literal
-              # e impede que templates do código gerado sejam avaliados pelo próprio gerador.
               body = re.sub(r"\$\{\s*'\$\{([^']+)\}'\s*\}", lambda m: r'\${' + m.group(1) + '}', body)
               body = re.sub(r'(?<!\\)`', r'\`', body)
               body = re.sub(r'(?<!\\)\$\{', r'\${', body)
@@ -79,7 +77,6 @@ jobs:
           sanitize_labeled("text = replaceRegex(text, /\\$\\('#positionForm'", "position debt submit")
           sanitize_labeled("text = replaceRegex(text, /async function loadData", "mobile load accounts")
 
-          # Dois replaces curtos contêm template literal dentro do template do gerador.
           src = src.replace(
               "${walletsCache.find(w => w.id === tx.walletId) ? ` · ${esc(walletsCache.find(w => w.id === tx.walletId).name)}` : ''}",
               r"\${walletsCache.find(w => w.id === tx.walletId) ? \` · \${esc(walletsCache.find(w => w.id === tx.walletId).name)}\` : ''}"
