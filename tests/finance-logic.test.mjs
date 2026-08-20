@@ -34,6 +34,12 @@ test('contributions are separated from consumption and cash balance', () => {
   assert.equal(isContribution(tx[1]), true);
 });
 
+test('contribution classifier only accepts the dedicated contribution category', () => {
+  assert.equal(isContribution({type:'expense', category:'Investimentos/Aportes'}), true);
+  assert.equal(isContribution({type:'expense', category:'Investimento em curso'}), false);
+  assert.equal(isContribution({type:'expense', category:'Aporte eventual'}), false);
+});
+
 test('monthly spending goal is exactly 60% of income and contributions are not spending', () => {
   const tx = [
     {type:'income', amount:10000, date:'2026-08-01', category:'Salário'},
@@ -184,7 +190,7 @@ test('reserve target is stable when user navigates from August to September', ()
   assert.equal(september.target,august.target);
 });
 
-test('high historical spending never overrides recurring reserve base', () => {
+test('mature historical spending raises reserve base when it exceeds current recurring commitments', () => {
   const tx=[
     {type:'expense',amount:3000,date:'2026-07-10',category:'Mercado'},
     {type:'expense',amount:3000,date:'2026-06-10',category:'Mercado'},
@@ -194,11 +200,24 @@ test('high historical spending never overrides recurring reserve base', () => {
   const r=reserveMetrics({reserve:18000,transactions:tx,recurring,todayYmd:'2026-08-18',targetMonths:6});
   assert.equal(r.historyMonths,3);
   assert.equal(r.observedHistoricalBase,3000);
+  assert.equal(r.historicalBase,3000);
+  assert.equal(r.monthlyBase,3000);
+  assert.equal(r.target,18000);
+  assert.equal(r.progress,1);
+  assert.equal(r.months,6);
+});
+
+test('short spending history does not destabilize reserve target', () => {
+  const tx=[
+    {type:'expense',amount:9000,date:'2026-07-10',category:'Mercado'},
+    {type:'expense',amount:8000,date:'2026-06-10',category:'Mercado'}
+  ];
+  const recurring=[{active:true,type:'expense',amount:2000,category:'Moradia',startDate:'2026-01-01',endDate:''}];
+  const r=reserveMetrics({reserve:6000,transactions:tx,recurring,todayYmd:'2026-08-18',targetMonths:6});
+  assert.equal(r.historyMonths,2);
   assert.equal(r.historicalBase,0);
   assert.equal(r.monthlyBase,2000);
   assert.equal(r.target,12000);
-  assert.equal(r.progress,1);
-  assert.equal(r.months,9);
 });
 
 test('reserve target is exactly six months of recurring expenses when configured for six months', () => {
@@ -219,7 +238,7 @@ test('score uses contribution goal and automatic monthly spending goal', () => {
   assert.equal(scoreMetrics({contribution:1000,contributionGoal:1000,spending:4000,spendingGoal:0,reserveProgress:1}).score,null);
   const partial=scoreMetrics({contribution:1000,contributionGoal:1000,spending:4000,spendingGoal:6000,reserveProgress:null});
   assert.equal(partial.completeness,75);
-  assert.equal(partial.score,75);
+  assert.equal(partial.score,100);
   assert.equal(partial.spendingScore,1);
   const s=scoreMetrics({contribution:1000,contributionGoal:1000,spending:4000,spendingGoal:6000,reserveProgress:0.5});
   assert.equal(s.completeness,100);

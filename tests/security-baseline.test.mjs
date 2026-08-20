@@ -6,6 +6,7 @@ const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8'
 
 const schema = read('supabase/migrations/001_initial_schema.sql');
 const timestampGuards = read('supabase/migrations/002_server_timestamp_guards.sql');
+const hardeningMigration = read('supabase/migrations/20260820111724_harden_financial_integrity_and_permanent_user_rls.sql');
 const functionConfig = read('supabase/config.toml');
 const supabaseConfig = read('supabase-config.js');
 const supabaseClient = read('supabase-client.js');
@@ -42,6 +43,18 @@ test('RLS limita CRUD ao proprietário autenticado', () => {
   assert.match(schema, /for all to authenticated/i);
 });
 
+test('RLS também bloqueia identidades anônimas e falha fechado sem claim', () => {
+  for (const policy of [
+    'transactions_permanent_users_only', 'positions_permanent_users_only',
+    'planning_permanent_users_only', 'monthly_goals_permanent_users_only',
+    'recurring_permanent_users_only', 'scheduled_permanent_users_only'
+  ]) assert.ok(hardeningMigration.includes(`create policy ${policy}`), `política restritiva ausente: ${policy}`);
+  const restrictive = hardeningMigration.match(/as restrictive for all/g) || [];
+  assert.equal(restrictive.length, 6);
+  assert.match(hardeningMigration, /auth\.jwt\(\)->>'is_anonymous'/);
+  assert.match(hardeningMigration, /coalesce\([\s\S]*true\) = false/);
+});
+
 test('Dados financeiros são vinculados a auth.users com cascade delete', () => {
   const references = schema.match(/references auth\.users\(id\) on delete cascade/g) || [];
   assert.equal(references.length, 6);
@@ -55,6 +68,17 @@ test('Banco preserva validações financeiras e IDs graváveis', () => {
   }
   assert.match(schema, /amount > 0 and amount < 100000000/);
   assert.match(schema, /"reserveTargetMonths" between 1 and 24/);
+});
+
+test('Banco valida datas reais, intervalos e vínculo de origem', () => {
+  assert.match(hardeningMigration, /transactions_source_pair_valid/);
+  assert.match(hardeningMigration, /transactions_date_calendar_valid/);
+  assert.match(hardeningMigration, /recurring_start_date_calendar_valid/);
+  assert.match(hardeningMigration, /recurring_end_date_calendar_valid/);
+  assert.match(hardeningMigration, /recurring_date_range_valid/);
+  assert.match(hardeningMigration, /scheduled_due_date_calendar_valid/);
+  assert.match(hardeningMigration, /monthly_goals_month_calendar_valid/);
+  assert.match(hardeningMigration, /pg_input_is_valid/);
 });
 
 test('Timestamps críticos são controlados pelo PostgreSQL para sessões do PWA', () => {
@@ -93,13 +117,16 @@ test('CRUD legado resolve somente para tabelas Supabase conhecidas', () => {
   assert.match(firestoreCompat, /Coleção não suportada/);
 });
 
-test('Exclusão de conta usa chave secreta somente na Edge Function com validação explícita do usuário', () => {
+test('Exclusão de conta combina gateway JWT, validação do usuário e origem restrita', () => {
   assert.match(authCompat, /functions\.invoke\('delete-account'/);
   assert.match(deleteAccount, /SUPABASE_SECRET_KEYS/);
   assert.match(deleteAccount, /secretKeys\.default/);
   assert.match(deleteAccount, /auth\.getUser\(token\)/);
   assert.match(deleteAccount, /auth\.admin\.deleteUser\(userData\.user\.id\)/);
-  assert.match(functionConfig, /\[functions\.delete-account\][\s\S]*verify_jwt\s*=\s*false/);
+  assert.match(deleteAccount, /ALLOWED_ORIGINS/);
+  assert.match(deleteAccount, /body\?\.confirm !== true/);
+  assert.match(deleteAccount, /userData\.user\.is_anonymous/);
+  assert.match(functionConfig, /\[functions\.delete-account\][\s\S]*verify_jwt\s*=\s*true/);
   assert.doesNotMatch(authCompat, /SUPABASE_SECRET_KEYS|sb_secret_/);
 });
 
@@ -113,10 +140,13 @@ test('Migrador administrativo usa credenciais somente por ambiente e mapeia usu�
   assert.doesNotMatch(migrationTool, /sb_secret_[A-Za-z0-9_-]+/);
 });
 
-test('Camada de sessão mantém política forte e encerra por inatividade', () => {
-  assert.match(hardening, /browserSessionPersistence/);
+test('Camada de sessão mantém política forte e encerra por inatividade inclusive no PWA reaberto', () => {
   assert.match(hardening, /15\s*\*\s*60\s*\*\s*1000/);
+  assert.match(hardening, /IS_MOBILE_PWA/);
+  assert.match(hardening, /localStorage/);
+  assert.match(hardening, /sessionStorage/);
   assert.match(hardening, /signOut\(auth\)/);
+  assert.match(hardening, /now\(\) - lastActivity >= IDLE_TIMEOUT_MS/);
   assert.match(hardening, /password\.length\s*>=\s*12/);
   assert.match(hardening, /\[a-z\]/);
   assert.match(hardening, /\[A-Z\]/);
@@ -124,7 +154,7 @@ test('Camada de sessão mantém política forte e encerra por inatividade', () =
   assert.match(hardening, /\[\^A-Za-z0-9\]/);
 });
 
-test('PWA inclui a nova infraestrutura no cache', () => {
+test('PWA inclui a infraestrutura Supabase no cache', () => {
   for (const sw of [rootSw, mobileSw]) {
     assert.match(sw, /supabase-config\.js/);
     assert.match(sw, /supabase-client\.js/);
