@@ -144,7 +144,7 @@ function prepareUi() {
   const patrimonyKicker = $('#netWorth')?.closest('.networth-card')?.querySelector('.card-kicker');
   if (patrimonyKicker) patrimonyKicker.textContent = 'PATRIMÔNIO';
   const patrimonyLabels = $$('#patrimonySection .metric-strip .mini-metric > span');
-  if (patrimonyLabels[0]) patrimonyLabels[0].textContent = 'Carteiras';
+  if (patrimonyLabels[0]) patrimonyLabels[0].textContent = 'Ativos';
   if (patrimonyLabels[1]) patrimonyLabels[1].textContent = 'Dívidas (informativo)';
   if (patrimonyLabels[2]) patrimonyLabels[2].textContent = 'Patrimônio';
 
@@ -1277,7 +1277,7 @@ function renderAgenda() {
 
 function renderPositions() {
   const positions = calcPositions();
-  $('#assetsTotal').textContent = currency.format(positions.walletAssets);
+  $('#assetsTotal').textContent = currency.format(positions.assets);
   $('#debtsTotal').textContent = currency.format(positions.debts);
   $('#patrimonyNetWorth').textContent = currency.format(positions.netWorth);
 
@@ -1348,8 +1348,10 @@ function openInstallmentGroup(groupId) {
   $('#transactionRoute').value = 'card';
   $('#transactionCardId').value = sample.cardId || '';
   $('#transactionInstallments').value = String(active.length);
-  $('#transactionFirstInvoiceMonth').value = String(sample.firstInvoiceMonth || sample.dueDate || '').slice(0, 7);
+  $('#transactionFirstInvoiceMonth').value = String(sample.dueDate || '').slice(0, 7);
   $('#transactionFirstInvoiceMonth').dataset.manual = 'true';
+  const invoiceLabel = $('#transactionFirstInvoiceLabel');
+  if (invoiceLabel?.childNodes[0]) invoiceLabel.childNodes[0].textContent = hasPosted ? 'Mês da próxima fatura' : 'Mês da primeira fatura';
   $('#transactionRoute').disabled = true;
   $('#transactionCardId').disabled = hasPosted;
   $('#transactionDate').disabled = hasPosted;
@@ -1388,7 +1390,7 @@ async function saveInstallmentGroupEdit(groupId, { amount, category, description
       type:'expense', amount:part.amount, category, description:description || category,
       dueDate:part.date, frequency:'once', status:'active',
       walletId:card.paymentWalletId, cardId:card.id, purchaseDate,
-      firstInvoiceMonth, installmentGroupId:groupId, installmentNumber, installmentTotal:totalInstallments,
+      installmentGroupId:groupId, installmentNumber, installmentTotal:totalInstallments,
       createdAt:serverTimestamp(), updatedAt:serverTimestamp()
     });
   }
@@ -1401,6 +1403,8 @@ function openTransaction(tx = null) {
   $('#transactionDate').disabled = false;
   $('#transactionInstallments').disabled = false;
   if ($('#transactionFirstInvoiceMonth')) { $('#transactionFirstInvoiceMonth').value = ''; $('#transactionFirstInvoiceMonth').dataset.manual = 'false'; }
+  const invoiceLabel = $('#transactionFirstInvoiceLabel');
+  if (invoiceLabel?.childNodes[0]) invoiceLabel.childNodes[0].textContent = 'Mês da primeira fatura';
   const amountLabel = $('#transactionAmount')?.closest('label');
   if (amountLabel?.childNodes[0]) amountLabel.childNodes[0].textContent = 'Valor';
   if (tx && (tx.sourceType === 'recurring' || tx.projected || isWithdrawal(tx))) return;
@@ -1549,7 +1553,7 @@ $('#transactionForm').addEventListener('submit', async event => {
           name: `${description || category} · ${part.installmentNumber}/${part.installmentTotal}`,
           type:'expense', amount:part.amount, category, description:description || category,
           dueDate:part.date, frequency:'once', status:'active',
-          walletId:card.paymentWalletId, cardId:card.id, purchaseDate:date, firstInvoiceMonth,
+          walletId:card.paymentWalletId, cardId:card.id, purchaseDate:date,
           installmentGroupId:groupId, installmentNumber:part.installmentNumber, installmentTotal:part.installmentTotal,
           createdAt:serverTimestamp(), updatedAt:serverTimestamp()
         });
