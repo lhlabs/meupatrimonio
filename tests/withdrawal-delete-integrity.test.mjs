@@ -11,7 +11,7 @@ test('excluir visualmente um resgate não devolve o valor aos aportes', () => {
   assert.equal(contributionBalance(transactions, '2026-08-20'), 600);
 });
 
-test('resgate arquivado deixa de afetar saldo e métricas do mês', () => {
+test('resgate arquivado deixa de afetar caixa, mas continua reduzindo o aporte líquido', () => {
   const wallets = [{ id:'w1', initialBalance:1000 }];
   const transactions = [
     { id:'aporte', type:'expense', amount:1000, category:'Investimentos/Aportes', date:'2026-08-01', walletId:'w1' },
@@ -19,6 +19,7 @@ test('resgate arquivado deixa de afetar saldo e métricas do mês', () => {
   ];
   const metrics = monthMetrics(transactions, new Date(2026, 7, 1));
   assert.equal(metrics.withdrawal, 0);
+  assert.equal(metrics.contribution, 600);
   assert.equal(walletMetrics(wallets, [], transactions, '2026-08-20').total, 0);
   assert.equal(contributionBalance(transactions, '2026-08-20'), 600);
 });
