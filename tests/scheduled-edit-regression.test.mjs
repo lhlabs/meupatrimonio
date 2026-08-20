@@ -13,7 +13,7 @@ test('lançamento materializado de agendamento permanece editável', () => {
 test('agenda lançada aponta para a transação efetivamente materializada', () => {
   assert.match(app, /function latestScheduledTransaction\(sourceId\)/);
   assert.match(app, /item\.status === 'posted' \? latestScheduledTransaction\(item\.id\) : null/);
-  assert.match(app, /data-edit-tx=\\"\$\{postedTx\.id\}\\">Editar lançamento/);
+  assert.ok(app.includes('data-edit-tx="${postedTx.id}">Editar lançamento'));
 });
 
 test('agendamentos usam um único gerador de id em materialização e previsão', () => {
