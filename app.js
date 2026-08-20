@@ -94,6 +94,17 @@ function dateFromMonthKey(key) {
   const [year, month] = String(key || '').split('-').map(Number);
   return Number.isFinite(year) && Number.isFinite(month) ? new Date(year, month - 1, 1) : null;
 }
+function scheduledTransactionId(scheduled, due) {
+  if (!scheduled?.id || !due) return '';
+  return scheduled.frequency === 'annual'
+    ? `sched_${scheduled.id}_${String(due).slice(0,4)}`
+    : `sched_${scheduled.id}`;
+}
+function latestScheduledTransaction(sourceId) {
+  return txCache
+    .filter(tx => tx.sourceType === 'scheduled' && tx.sourceId === sourceId)
+    .sort((a,b) => String(b.date || '').localeCompare(String(a.date || '')) || timestampValue(b.createdAt) - timestampValue(a.createdAt))[0] || null;
+}
 
 async function runAction(button, task, successMessage) {
   if (actionBusy) return;
@@ -424,9 +435,7 @@ async function processAutomations() {
     let due = scheduled.dueDate;
     let guard = 0;
     while (due && due <= today && guard++ < 20) {
-      const id = scheduled.frequency === 'annual'
-        ? `sched_${scheduled.id}_${due.slice(0,4)}`
-        : `sched_${scheduled.id}`;
+      const id = scheduledTransactionId(scheduled, due);
       if (!existingIds.has(id)) {
         await setDoc(userDoc('transactions', id), {
           type: scheduled.type,
@@ -629,8 +638,9 @@ function renderScoreAndPet(score, context) {
 function txRow(tx) {
   const source = tx.sourceType === 'recurring' ? (tx.projected ? ' · recorrente prevista' : ' · recorrente') : tx.sourceType === 'scheduled' ? ' · agendada' : '';
   let actions = '';
-  if (tx.sourceType) actions = '<span class="muted">Automático</span>';
-  else if (isWithdrawal(tx)) actions = `<button class="mini-btn danger" data-delete-tx="${tx.id}">Excluir</button>`;
+  if (isWithdrawal(tx)) actions = `<button class="mini-btn danger" data-delete-tx="${tx.id}">Excluir</button>`;
+  else if (tx.sourceType === 'scheduled') actions = `<button class="mini-btn" data-edit-tx="${tx.id}">Editar</button><span class="muted">Agendado</span>`;
+  else if (tx.sourceType) actions = '<span class="muted">Automático</span>';
   else actions = `<button class="mini-btn" data-edit-tx="${tx.id}">Editar</button><button class="mini-btn danger" data-delete-tx="${tx.id}">Excluir</button>`;
   return `<div class="list-row"><div class="list-icon">${tx.type === 'expense' ? '−' : '+'}</div><div class="list-main"><strong>${esc(tx.description || tx.category)}</strong><small>${esc(tx.category)} · ${formatDate(tx.date)}${source}${isContribution(tx) ? ' · aporte' : ''}${isWithdrawal(tx) ? ' · resgate patrimonial' : ''}</small></div><div><div class="money ${tx.type}">${tx.type === 'expense' ? '−' : '+'}${currency.format(safeNumber(tx.amount))}</div><div class="row-actions">${actions}</div></div></div>`;
 }
@@ -741,7 +751,7 @@ function plannedForMonth(date) {
       while (due.slice(0,7) < key && guard++ < 50) due = addYear(due);
     }
     if (!due || !due.startsWith(key)) return;
-    const exists = txCache.some(tx => tx.sourceType === 'scheduled' && tx.sourceId === scheduled.id && String(tx.date || '').startsWith(key));
+    const exists = txCache.some(tx => tx.id === scheduledTransactionId(scheduled, due));
     if (!exists) out.push({ name: scheduled.name, amount: safeNumber(scheduled.amount), type: scheduled.type, date: due, category: scheduled.category, icon:'📅', sourceType:'scheduled', sourceId:scheduled.id });
   });
   return out.sort((a,b) => a.date.localeCompare(b.date));
@@ -825,7 +835,15 @@ function renderAgenda() {
   $('#recurringCount').textContent = `${recurringCache.filter(item => item.active).length} ativas`;
   $('#scheduledCount').textContent = `${scheduledCache.filter(item => item.status === 'active').length} futuras`;
   $('#recurringList').innerHTML = recurringCache.map(item => `<div class="agenda-item ${item.active ? '' : 'inactive'}"><div class="agenda-icon">🔁</div><div><strong>${esc(item.name)}</strong><small>${currency.format(safeNumber(item.amount))} · dia ${item.dayOfMonth} · ${esc(item.category)}</small></div><div class="agenda-actions"><button class="mini-btn" data-edit-rec="${item.id}">Editar</button><button class="mini-btn danger" data-del-rec="${item.id}">Excluir</button></div></div>`).join('') || '<div class="empty-state">Nenhuma recorrência.</div>';
-  $('#scheduledList').innerHTML = scheduledCache.map(item => `<div class="agenda-item ${item.status === 'active' ? '' : 'inactive'}"><div class="agenda-icon">📅</div><div><strong>${esc(item.name)}</strong><small>${currency.format(safeNumber(item.amount))} · ${formatDate(item.dueDate)} · ${item.frequency === 'annual' ? 'anual' : item.status === 'posted' ? 'lançada' : 'uma vez'}</small></div><div class="agenda-actions">${item.status === 'active' ? `<button class="mini-btn" data-edit-sch="${item.id}">Editar</button>` : ''}<button class="mini-btn danger" data-del-sch="${item.id}">Excluir</button></div></div>`).join('') || '<div class="empty-state">Nenhuma conta agendada.</div>';
+  $('#scheduledList').innerHTML = scheduledCache.map(item => {
+    const postedTx = item.status === 'posted' ? latestScheduledTransaction(item.id) : null;
+    const editAction = item.status === 'active'
+      ? `<button class="mini-btn" data-edit-sch="${item.id}">Editar</button>`
+      : postedTx
+        ? `<button class="mini-btn" data-edit-tx="${postedTx.id}">Editar lançamento</button>`
+        : '';
+    return `<div class="agenda-item ${item.status === 'active' ? '' : 'inactive'}"><div class="agenda-icon">📅</div><div><strong>${esc(item.name)}</strong><small>${currency.format(safeNumber(item.amount))} · ${formatDate(item.dueDate)} · ${item.frequency === 'annual' ? 'anual' : item.status === 'posted' ? 'lançada' : 'uma vez'}</small></div><div class="agenda-actions">${editAction}<button class="mini-btn danger" data-del-sch="${item.id}">Excluir</button></div></div>`;
+  }).join('') || '<div class="empty-state">Nenhuma conta agendada.</div>';
 }
 
 function renderPositions() {
@@ -873,7 +891,7 @@ function setTxType(type, currentCategory) {
 }
 
 function openTransaction(tx = null) {
-  if (tx && (tx.sourceType || isWithdrawal(tx))) return;
+  if (tx && (tx.sourceType === 'recurring' || tx.projected || isWithdrawal(tx))) return;
   $('#transactionForm').reset();
   $('#transactionEditId').value = tx?.id || '';
   const title = $('#transactionDialog h2');
@@ -885,7 +903,7 @@ function openTransaction(tx = null) {
   $('#transactionRecurring').checked = !!tx?.recurring;
   $('#transactionRecurring').disabled = !!tx;
   const recurringLabel = $('#transactionRecurring').closest('label');
-  if (recurringLabel) recurringLabel.style.opacity = tx ? '.55' : '1';
+  if (recurringLabel) recurringLabel.style.display = tx ? 'none' : '';
   $('#transactionDialog').showModal();
 }
 
