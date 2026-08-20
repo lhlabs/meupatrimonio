@@ -6,6 +6,8 @@ export const browserSessionPersistence = 'session';
 let rawUser = null;
 let lastSignup = { email: '', at: 0 };
 let recoveryHandled = false;
+let authRevision = 0;
+const localAuthListeners = new Set();
 
 function appUrl() {
   if (typeof window === 'undefined') return undefined;
@@ -42,19 +44,32 @@ function normalizeError(error) {
   return wrapped;
 }
 
+function updateRawUser(user) {
+  rawUser = user || null;
+  authRevision += 1;
+  return rawUser;
+}
+
+function notifyLocalAuth(user) {
+  const snapshot = user || null;
+  setTimeout(() => {
+    for (const listener of [...localAuthListeners]) listener(snapshot);
+  }, 0);
+}
+
 const authFacade = {
   get currentUser() { return mapUser(rawUser); },
   languageCode: 'pt-BR'
 };
 
 async function refreshCurrentUser() {
-  const observedUser = rawUser;
+  const observedRevision = authRevision;
   const { data, error } = await supabase.auth.getUser();
   if (error && !String(error.message || '').toLowerCase().includes('session')) throw normalizeError(error);
-  // Não deixa uma leitura iniciada antes do login sobrescrever um usuário
-  // que tenha sido autenticado enquanto a requisição estava em andamento.
-  if (rawUser !== observedUser) return mapUser(rawUser);
-  rawUser = data?.user || null;
+  // Uma resposta iniciada antes de um login/logout não pode sobrescrever
+  // o estado mais novo já conhecido pelo cliente.
+  if (authRevision !== observedRevision) return mapUser(rawUser);
+  updateRawUser(data?.user || null);
   return mapUser(rawUser);
 }
 
@@ -63,15 +78,20 @@ export function getAuth() {
 }
 
 export async function setPersistence() {
-  // O cliente Supabase usa sessionStorage, equivalente à política efetiva
-  // do aplicativo. Mantido como no-op para preservar o contrato legado.
+  // O cliente Supabase define o storage em supabase-client.js. Mantido como
+  // no-op para preservar o contrato legado da interface Firebase.
 }
 
 export async function signInWithEmailAndPassword(_auth, email, password) {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) throw normalizeError(error);
-  rawUser = data.user || null;
-  return { user: mapUser(rawUser) };
+  const signedInUser = data.user || data.session?.user || null;
+  updateRawUser(signedInUser);
+
+  // Entrega o usuário diretamente após o login ter terminado. Assim a UI não
+  // depende de um segundo evento do Supabase para sair da tela de acesso.
+  notifyLocalAuth(signedInUser);
+  return { user: mapUser(signedInUser) };
 }
 
 export async function createUserWithEmailAndPassword(_auth, email, password) {
@@ -81,7 +101,7 @@ export async function createUserWithEmailAndPassword(_auth, email, password) {
     options: { emailRedirectTo: appUrl() }
   });
   if (error) throw normalizeError(error);
-  rawUser = data.user || null;
+  updateRawUser(data.user || null);
   lastSignup = { email: String(email).toLowerCase(), at: Date.now() };
   return { user: mapUser(rawUser) };
 }
@@ -110,7 +130,8 @@ export async function sendPasswordResetEmail(_auth, email) {
 
 export async function signOut() {
   const { error } = await supabase.auth.signOut({ scope: 'local' });
-  rawUser = null;
+  updateRawUser(null);
+  notifyLocalAuth(null);
   if (error && !String(error.message || '').toLowerCase().includes('session')) throw normalizeError(error);
 }
 
@@ -118,7 +139,7 @@ export function onAuthStateChanged(_auth, callback) {
   let active = true;
   let delivered = false;
   let deliveredUid = undefined;
-  let authEventSeen = false;
+  const initialRevision = authRevision;
 
   const deliver = user => {
     if (!active) return;
@@ -130,34 +151,37 @@ export function onAuthStateChanged(_auth, callback) {
     callback(mapped);
   };
 
+  // Login/logout concluídos pelo próprio adaptador notificam este listener
+  // diretamente, sem depender do timing interno do onAuthStateChange.
+  localAuthListeners.add(deliver);
+
   supabase.auth.getSession().then(({ data }) => {
-    // Se um evento de Auth já chegou, o snapshot inicial ficou obsoleto.
-    if (!active || authEventSeen) return;
-    rawUser = data?.session?.user || null;
+    // O snapshot inicial é descartado se qualquer alteração de autenticação
+    // aconteceu enquanto a leitura estava em andamento.
+    if (!active || authRevision !== initialRevision) return;
+    updateRawUser(data?.session?.user || null);
     deliver(rawUser);
   }).catch(() => {
-    if (!active || authEventSeen) return;
-    rawUser = null;
+    if (!active || authRevision !== initialRevision) return;
+    updateRawUser(null);
     deliver(null);
   });
 
   const { data } = supabase.auth.onAuthStateChange((event, session) => {
-    authEventSeen = true;
     const eventUser = session?.user || null;
-    rawUser = eventUser;
+    updateRawUser(eventUser);
 
-    // Não execute callbacks da aplicação dentro do callback do Supabase Auth.
-    // Chamadas assíncronas ao mesmo cliente nesse contexto podem bloquear o
-    // próximo request (deadlock). O próximo macrotask encerra o lock do Auth.
-    setTimeout(() => {
-      if (!active) return;
-      deliver(eventUser);
-      if (event === 'PASSWORD_RECOVERY') void handlePasswordRecovery();
-    }, 0);
+    // O callback do Supabase permanece estritamente síncrono. Todo trabalho da
+    // aplicação é deslocado para um macrotask, evitando o deadlock documentado.
+    notifyLocalAuth(eventUser);
+    if (event === 'PASSWORD_RECOVERY') {
+      setTimeout(() => void handlePasswordRecovery(), 0);
+    }
   });
 
   return () => {
     active = false;
+    localAuthListeners.delete(deliver);
     data?.subscription?.unsubscribe?.();
   };
 }
@@ -174,7 +198,7 @@ export async function reauthenticateWithCredential(_currentUser, credential) {
     password: credential.password
   });
   if (error) throw normalizeError(error);
-  rawUser = data.user || null;
+  updateRawUser(data.user || null);
   return { user: mapUser(rawUser) };
 }
 
@@ -184,7 +208,8 @@ export async function deleteUser() {
   });
   if (error) throw normalizeError(error);
   if (!data?.deleted) throw new Error('A exclusão da conta não foi confirmada pelo servidor.');
-  rawUser = null;
+  updateRawUser(null);
+  notifyLocalAuth(null);
 }
 
 async function handlePasswordRecovery() {
@@ -216,7 +241,7 @@ async function handlePasswordRecovery() {
   }
 
   await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
-  rawUser = null;
+  updateRawUser(null);
   window.alert('Senha alterada com sucesso. Entre novamente com a nova senha.');
   const clean = new URL(window.location.href);
   clean.hash = '';
