@@ -212,6 +212,32 @@ export function projectedRecurringRows(transactions = [], recurring = [], date, 
     }));
 }
 
+export function projectedCardInstallmentRows(transactions = [], scheduled = [], date) {
+  const key = monthKey(date);
+  return scheduled
+    .filter(item => item && (item.status == null || item.status === 'active'))
+    .filter(item => item.cardId && item.installmentGroupId && String(item.dueDate || '').startsWith(key))
+    .filter(item => safeNumber(item.amount) > 0)
+    .filter(item => !transactions.some(tx => tx?.sourceType === 'scheduled' && tx?.sourceId === item.id))
+    .map(item => ({
+      id: `projected_card_${item.id}_${key}`,
+      type: 'expense',
+      amount: safeNumber(item.amount),
+      category: item.category,
+      description: item.description || item.name || 'Parcela do cartão',
+      date: item.dueDate,
+      sourceType: 'scheduled',
+      sourceId: item.id,
+      projected: true,
+      walletId: item.walletId || null,
+      cardId: item.cardId || null,
+      purchaseDate: item.purchaseDate || null,
+      installmentGroupId: item.installmentGroupId || null,
+      installmentNumber: item.installmentNumber ?? null,
+      installmentTotal: item.installmentTotal ?? null
+    }));
+}
+
 export function effectiveMonthRows(transactions = [], recurring = [], date, now = new Date()) {
   return [
     ...monthRows(transactions, date),
