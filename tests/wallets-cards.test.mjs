@@ -34,7 +34,27 @@ test('parcelas futuras permanecem como dívida de cartão até o vencimento', ()
   ];
   const metric = cardDebtMetrics(cards,[],scheduled,'2026-08-20');
   assert.equal(metric.total,600);
+  assert.equal(metric.incurredTotal,600);
   assert.equal(metric.byCard[0].availableLimit,4400);
+});
+
+test('compra futura registrada já aparece em aberto e consome limite sem antecipar patrimônio', () => {
+  const cards = [{id:'c1',creditLimit:5000}];
+  const wallets = [{id:'w1',initialBalance:1000}];
+  const scheduled = [
+    {cardId:'c1',walletId:'w1',status:'active',amount:600,dueDate:'2026-10-07',purchaseDate:'2026-09-07'}
+  ];
+  const cardMetric = cardDebtMetrics(cards,[],scheduled,'2026-08-20');
+  assert.equal(cardMetric.total,600);
+  assert.equal(cardMetric.incurredTotal,0);
+  assert.equal(cardMetric.byCard[0].open,600);
+  assert.equal(cardMetric.byCard[0].availableLimit,4400);
+  const positionBeforePurchase = positionMetrics([],[],'2026-08-20',wallets,cards,scheduled);
+  assert.equal(positionBeforePurchase.cardDebts,0);
+  assert.equal(positionBeforePurchase.netWorth,1000);
+  const positionAfterPurchase = positionMetrics([],[],'2026-09-07',wallets,cards,scheduled);
+  assert.equal(positionAfterPurchase.cardDebts,600);
+  assert.equal(positionAfterPurchase.netWorth,400);
 });
 
 test('patrimônio integra carteiras e cartão sem saldo duplicado', () => {
@@ -49,7 +69,6 @@ test('patrimônio integra carteiras e cartão sem saldo duplicado', () => {
   assert.equal(metric.debts,2600);
   assert.equal(metric.netWorth,11400);
 });
-
 
 test('compra no dia do fechamento entra na fatura seguinte', () => {
   const schedule = cardInstallmentSchedule({ amount:100, installments:1, purchaseDate:'2026-08-05', closingDay:5, dueDay:12 });
