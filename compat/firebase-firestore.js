@@ -19,7 +19,7 @@ class CompatTimestamp {
 }
 
 function tableName(name) {
-  if (['transactions','positions','monthlyGoals','recurring','scheduled'].includes(name)) return name;
+  if (['transactions','positions','monthlyGoals','recurring','scheduled','wallets','cards'].includes(name)) return name;
   if (name === 'config') return 'planning';
   throw new Error(`Coleção não suportada: ${name}`);
 }

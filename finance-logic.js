@@ -62,23 +62,103 @@ export function contributionBalance(transactions, throughDate = null) {
   return Math.max(0, contributions - withdrawals);
 }
 
-export function positionMetrics(positions = [], transactions = [], throughDate = ymd(new Date())) {
+export function splitInstallmentAmounts(amount, installments) {
+  const count = Math.max(1, Math.min(120, Math.trunc(safeNumber(installments) || 1)));
+  const cents = Math.round(Math.max(0, safeNumber(amount)) * 100);
+  if (cents < count) return [];
+  const base = Math.floor(cents / count);
+  const remainder = cents % count;
+  return Array.from({ length: count }, (_, index) => (base + (index < remainder ? 1 : 0)) / 100);
+}
+
+export function cardInstallmentSchedule({ amount, installments, purchaseDate, closingDay, dueDay }) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(purchaseDate || ''));
+  if (!match) return [];
+  const year = Number(match[1]), month = Number(match[2]), day = Number(match[3]);
+  const purchase = new Date(year, month - 1, day, 12);
+  if (purchase.getFullYear() !== year || purchase.getMonth() !== month - 1 || purchase.getDate() !== day) return [];
+  const close = Math.max(1, Math.min(31, Math.trunc(safeNumber(closingDay) || 1)));
+  const due = Math.max(1, Math.min(31, Math.trunc(safeNumber(dueDay) || 1)));
+  const amounts = splitInstallmentAmounts(amount, installments);
+  if (!amounts.length) return [];
+  const closingDate = dueDateFor(year, month - 1, close);
+  const statementMonth = new Date(year, month - 1 + (String(purchaseDate) > closingDate ? 1 : 0), 1, 12);
+  const firstDueMonth = new Date(statementMonth);
+  if (due <= close) firstDueMonth.setMonth(firstDueMonth.getMonth() + 1);
+  return amounts.map((installmentAmount, index) => {
+    const cursor = new Date(firstDueMonth.getFullYear(), firstDueMonth.getMonth() + index, 1, 12);
+    return {
+      amount: installmentAmount,
+      date: dueDateFor(cursor.getFullYear(), cursor.getMonth(), due),
+      installmentNumber: index + 1,
+      installmentTotal: amounts.length
+    };
+  });
+}
+
+export function walletMetrics(wallets = [], cards = [], transactions = [], throughDate = ymd(new Date())) {
+  void cards;
+  const byWallet = wallets.map(wallet => {
+    const movements = transactions.filter(item => item?.walletId === wallet.id && (!throughDate || String(item.date || '') <= throughDate));
+    const movementBalance = movements.reduce((sum, item) => {
+      const amount = safeNumber(item.amount);
+      return sum + (item.type === 'income' ? amount : item.type === 'expense' ? -amount : 0);
+    }, 0);
+    return { ...wallet, balance: safeNumber(wallet.initialBalance) + movementBalance };
+  });
+  return {
+    byWallet,
+    total: byWallet.reduce((sum, item) => sum + safeNumber(item.balance), 0)
+  };
+}
+
+export function cardDebtMetrics(cards = [], transactions = [], scheduled = [], throughDate = ymd(new Date())) {
+  void transactions;
+  const byCard = cards.map(card => {
+    const pending = scheduled
+      .filter(item => item?.status === 'active' && item.cardId === card.id)
+      .filter(item => !item.purchaseDate || !throughDate || String(item.purchaseDate) <= throughDate)
+      .sort((a, b) => String(a.dueDate || '').localeCompare(String(b.dueDate || '')));
+    const open = pending.reduce((sum, item) => sum + safeNumber(item.amount), 0);
+    const nextDue = pending[0]?.dueDate || '';
+    const nextMonth = String(nextDue).slice(0, 7);
+    const nextInvoice = nextMonth
+      ? pending.filter(item => String(item.dueDate || '').startsWith(nextMonth)).reduce((sum, item) => sum + safeNumber(item.amount), 0)
+      : 0;
+    return {
+      ...card,
+      open,
+      nextDue,
+      nextInvoice,
+      availableLimit: Math.max(0, safeNumber(card.creditLimit) - open)
+    };
+  });
+  return { byCard, total: byCard.reduce((sum, item) => sum + safeNumber(item.open), 0) };
+}
+
+export function positionMetrics(positions = [], transactions = [], throughDate = ymd(new Date()), wallets = [], cards = [], scheduled = []) {
   const manualAssets = positions
     .filter(item => ['asset', 'reserve'].includes(item?.type))
     .reduce((sum, item) => sum + safeNumber(item.value), 0);
   const manualReserve = positions
     .filter(item => item?.type === 'reserve')
     .reduce((sum, item) => sum + safeNumber(item.value), 0);
-  const debts = positions
+  const manualDebts = positions
     .filter(item => item?.type === 'debt')
     .reduce((sum, item) => sum + safeNumber(item.value), 0);
   const contributionAssets = contributionBalance(transactions, throughDate);
-  const assets = manualAssets + contributionAssets;
+  const walletAssets = walletMetrics(wallets, cards, transactions, throughDate).total;
+  const cardDebts = cardDebtMetrics(cards, transactions, scheduled, throughDate).total;
+  const assets = manualAssets + contributionAssets + walletAssets;
   const reserve = manualReserve + contributionAssets;
+  const debts = manualDebts + cardDebts;
   return {
     manualAssets,
     manualReserve,
+    manualDebts,
     contributionAssets,
+    walletAssets,
+    cardDebts,
     assets,
     reserve,
     debts,
