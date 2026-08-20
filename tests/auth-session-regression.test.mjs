@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('../compat/firebase-auth.js', import.meta.url), 'utf8');
+const registration = await readFile(new URL('../registration.js', import.meta.url), 'utf8');
+const app = await readFile(new URL('../app.js', import.meta.url), 'utf8');
+const mobile = await readFile(new URL('../mobile/mobile.js', import.meta.url), 'utf8');
 const webSw = await readFile(new URL('../sw.js', import.meta.url), 'utf8');
 const mobileSw = await readFile(new URL('../mobile/sw.js', import.meta.url), 'utf8');
 
@@ -15,6 +18,13 @@ test('auth state callback does not run application async work inside Supabase au
 test('successful password login notifies application directly', () => {
   assert.match(source, /signInWithEmailAndPassword[\s\S]*?notifyLocalAuth\(signedInUser\);/);
   assert.match(source, /localAuthListeners\.add\(deliver\);/);
+});
+
+test('registration module never competes for the login form', () => {
+  assert.doesNotMatch(registration, /signInWithEmailAndPassword/);
+  assert.doesNotMatch(registration, /loginForm\?\.addEventListener\(['"]submit['"]/);
+  assert.match(app, /#loginForm'\)\.addEventListener\('submit'/);
+  assert.match(mobile, /#loginForm'\)\.addEventListener\('submit'/);
 });
 
 test('initial session snapshot cannot overwrite a newer auth state', () => {

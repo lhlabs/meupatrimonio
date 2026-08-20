@@ -2,7 +2,6 @@ import { getApps, getApp, initializeApp } from "https://www.gstatic.com/firebase
 import {
   getAuth,
   createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
   sendEmailVerification,
   signOut
 } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-auth.js";
@@ -120,40 +119,9 @@ try {
   const ui = injectRegistrationUi();
 
   if (ui) {
-    const loginForm = document.querySelector('#loginForm');
-
-    loginForm?.addEventListener('submit', async event => {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      const button = event.submitter;
-      const email = document.querySelector('#email')?.value.trim() || '';
-      const password = document.querySelector('#password')?.value || '';
-      if (button) button.disabled = true;
-
-      try {
-        await signInWithEmailAndPassword(auth, email, password);
-      } catch (error) {
-        console.error('Falha de autenticação.', error);
-        const code = String(error?.code || '');
-        if (code.includes('email-not-verified')) {
-          ui.showRegister();
-          const registerEmail = ui.panel.querySelector('#registerEmail');
-          if (registerEmail) registerEmail.value = email;
-          ui.showResend(true);
-          ui.setStatus('Seu cadastro existe, mas o e-mail ainda precisa ser confirmado. Reenvie a confirmação se necessário.');
-        } else {
-          const toast = document.querySelector('#toast');
-          if (toast) {
-            toast.textContent = authMessage(error);
-            toast.classList.add('show');
-            setTimeout(() => toast.classList.remove('show'), 3200);
-          }
-        }
-      } finally {
-        if (button) button.disabled = false;
-      }
-    }, true);
-
+    // O formulário de login pertence exclusivamente ao app.js/mobile.js.
+    // Este módulo cuida apenas de cadastro e verificação de e-mail para evitar
+    // handlers concorrentes disparando múltiplos logins no mesmo clique.
     ui.panel.querySelector('#registerForm').addEventListener('submit', async event => {
       event.preventDefault();
       const form = event.currentTarget;
