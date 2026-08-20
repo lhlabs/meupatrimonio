@@ -51,15 +51,6 @@ alter table public.transactions
 alter table public.transactions
   add constraint transactions_wallet_fk foreign key (user_id, "walletId") references public.wallets(user_id, id) on delete restrict,
   add constraint transactions_card_fk foreign key (user_id, "cardId") references public.cards(user_id, id) on delete restrict,
-  add constraint transactions_route_exclusive check (not ("walletId" is not null and "cardId" is not null)),
-  add constraint transactions_card_expense_only check ("cardId" is null or type = 'expense'),
-  add constraint transactions_purchase_date_valid check ("purchaseDate" is null or (case when pg_input_is_valid("purchaseDate", 'date') then ("purchaseDate"::date)::text = "purchaseDate" else false end)),
-  add constraint transactions_installment_group_valid check ("installmentGroupId" is null or "installmentGroupId" ~ '^[A-Za-z0-9_-]{1,160}$'),
-  add constraint transactions_installment_metadata_valid check (
-    ("installmentGroupId" is null and "installmentNumber" is null and "installmentTotal" is null)
-    or
-    ("cardId" is not null and "installmentGroupId" is not null and "installmentNumber" between 1 and 120 and "installmentTotal" between 1 and 120 and "installmentNumber" <= "installmentTotal")
-  );
 
 alter table public.recurring
   add column if not exists "walletId" text,
@@ -68,8 +59,6 @@ alter table public.recurring
 alter table public.recurring
   add constraint recurring_wallet_fk foreign key (user_id, "walletId") references public.wallets(user_id, id) on delete restrict,
   add constraint recurring_card_fk foreign key (user_id, "cardId") references public.cards(user_id, id) on delete restrict,
-  add constraint recurring_route_exclusive check (not ("walletId" is not null and "cardId" is not null)),
-  add constraint recurring_card_expense_only check ("cardId" is null or type = 'expense');
 
 alter table public.scheduled
   add column if not exists "walletId" text,
@@ -82,15 +71,6 @@ alter table public.scheduled
 alter table public.scheduled
   add constraint scheduled_wallet_fk foreign key (user_id, "walletId") references public.wallets(user_id, id) on delete restrict,
   add constraint scheduled_card_fk foreign key (user_id, "cardId") references public.cards(user_id, id) on delete restrict,
-  add constraint scheduled_route_exclusive check (not ("walletId" is not null and "cardId" is not null)),
-  add constraint scheduled_card_expense_only check ("cardId" is null or type = 'expense'),
-  add constraint scheduled_purchase_date_valid check ("purchaseDate" is null or (case when pg_input_is_valid("purchaseDate", 'date') then ("purchaseDate"::date)::text = "purchaseDate" else false end)),
-  add constraint scheduled_installment_group_valid check ("installmentGroupId" is null or "installmentGroupId" ~ '^[A-Za-z0-9_-]{1,160}$'),
-  add constraint scheduled_installment_metadata_valid check (
-    ("installmentGroupId" is null and "installmentNumber" is null and "installmentTotal" is null)
-    or
-    ("cardId" is not null and "purchaseDate" is not null and "installmentGroupId" is not null and "installmentNumber" between 1 and 120 and "installmentTotal" between 1 and 120 and "installmentNumber" <= "installmentTotal")
-  );
 
 alter table public.positions
   add column if not exists "debtKind" text,

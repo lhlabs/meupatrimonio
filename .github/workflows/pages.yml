@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: pages-${{ github.ref }}
@@ -22,81 +22,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: feature/wallets-cards-debts
-          persist-credentials: true
-      - name: Apply wallet feature patch once
-        if: github.event_name == 'pull_request'
-        run: |
-          if [ -f tools/apply-wallets-feature.mjs ]; then
-            python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          path = Path('tools/apply-wallets-feature.mjs')
-          src = path.read_text()
-
-          def clean(body):
-              body = re.sub(r"\$\{\s*'\$\{([^']+)\}'\s*\}", lambda m: r'\${' + m.group(1) + '}', body)
-              body = re.sub(r'(?<!\\)`', r'\`', body)
-              body = re.sub(r'(?<!\\)\$\{', r'\${', body)
-              return body
-
-          def sanitize_region(start_marker, end_marker):
-              global src
-              start = src.find(start_marker)
-              if start < 0:
-                  raise SystemExit(f'marcador inicial não encontrado: {start_marker[:60]}')
-              start += len(start_marker)
-              end = src.find(end_marker, start)
-              if end < 0:
-                  raise SystemExit(f'marcador final não encontrado: {end_marker[:60]}')
-              src = src[:start] + clean(src[start:end]) + src[end:]
-
-          def sanitize_labeled(anchor, label):
-              global src
-              pos = src.find(anchor)
-              if pos < 0:
-                  raise SystemExit(f'âncora não encontrada: {anchor[:60]}')
-              start = src.find('`', pos)
-              if start < 0:
-                  raise SystemExit(f'template não encontrado após: {anchor[:60]}')
-              marker = f"`, '{label}');"
-              end = src.find(marker, start + 1)
-              if end < 0:
-                  raise SystemExit(f'fechamento não encontrado para: {label}')
-              src = src[:start + 1] + clean(src[start + 1:end]) + src[end:]
-
-          sanitize_region("  const accountUi = `", "\n`;\n  text = replaceOnce(text, `function installTransactionPeriodFilter() {`")
-          sanitize_labeled("text = replaceRegex(text, /async function loadAll", "load all accounts")
-          sanitize_labeled("text = replaceRegex(text, /function txRow", "transaction row labels")
-          sanitize_labeled("text = replaceRegex(text, /function renderAgenda", "agenda installment grouping")
-          sanitize_labeled("text = replaceRegex(text, /function renderPositions", "debt composition rendering")
-          sanitize_labeled("text = replaceRegex(text, /function openTransaction", "open transaction routes")
-          sanitize_labeled("text = replaceRegex(text, /function openPosition", "open debt position")
-          sanitize_labeled("text = replaceRegex(text, /\\$\\('#transactionForm'", "transaction submit wallet/card")
-          sanitize_labeled("text = replaceRegex(text, /\\$\\('#positionForm'", "position debt submit")
-          sanitize_labeled("text = replaceRegex(text, /async function loadData", "mobile load accounts")
-
-          src = src.replace(
-              "${walletsCache.find(w => w.id === tx.walletId) ? ` · ${esc(walletsCache.find(w => w.id === tx.walletId).name)}` : ''}",
-              r"\${walletsCache.find(w => w.id === tx.walletId) ? \` · \${esc(walletsCache.find(w => w.id === tx.walletId).name)}\` : ''}"
-          )
-          src = src.replace(r"\\${walletsCache.find", r"\${walletsCache.find")
-
-          path.write_text(src)
-          PY
-            node --check tools/apply-wallets-feature.mjs
-            node tools/apply-wallets-feature.mjs
-            rm -f tools/apply-wallets-feature.mjs .github/workflows/apply-wallets-feature.yml .wallet-feature-trigger
-            git fetch origin main --depth=1
-            git show origin/main:.github/workflows/pages.yml > .github/workflows/pages.yml
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -- app.js finance-logic.js compat/firebase-firestore.js mobile/index.html mobile/mobile.js styles.css sw.js mobile/sw.js supabase/migrations/20260820143000_wallets_cards_debt_composition.sql tests/wallets-cards.test.mjs tests/wallet-security.test.mjs .github/workflows/pages.yml
-            git add -u -- tools/apply-wallets-feature.mjs .github/workflows/apply-wallets-feature.yml .wallet-feature-trigger
-            git commit -m "feat: add wallets cards installments and debt composition [wallet-patch-applied]"
-            git push origin HEAD:feature/wallets-cards-debts
-          fi
+          persist-credentials: false
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:

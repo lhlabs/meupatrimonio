@@ -10,10 +10,10 @@ import {
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-app-check.js";
 import { firebaseConfig, appCheckSiteKey } from "./firebase-config.js";
 import {
-  CONTRIBUTION_CATEGORY, WITHDRAWAL_CATEGORY, addYear, clamp, contributionBalance,
+  CONTRIBUTION_CATEGORY, WITHDRAWAL_CATEGORY, addYear, cardDebtMetrics, cardInstallmentSchedule, clamp, contributionBalance,
   isContribution, isWithdrawal, monthKey, monthMetrics, monthlySpendingGoal,
   nextRecurringDue, periodSpendingMetrics, positionMetrics, projectFutureValue,
-  recurringDue, reserveMetrics, safeNumber, scoreMetrics, shouldMaterializeRecurring, ymd
+  recurringDue, reserveMetrics, safeNumber, scoreMetrics, shouldMaterializeRecurring, walletMetrics, ymd
 } from "./finance-logic.js";
 
 const $ = selector => document.querySelector(selector);
@@ -51,6 +51,8 @@ let txCache = [];
 let positionsCache = [];
 let recurringCache = [];
 let scheduledCache = [];
+let walletsCache = [];
+let cardsCache = [];
 let monthlyGoalsCache = [];
 let settings = {};
 let agendaAvailable = true;
@@ -88,7 +90,14 @@ function goalFor(date = selectedMonth) {
   const key = monthKey(date);
   return monthlyGoalsCache.find(goal => goal.id === key || goal.month === key) || null;
 }
-function calcPositions() { return positionMetrics(positionsCache, txCache, ymd(new Date())); }
+function calcPositions() { return positionMetrics(positionsCache, txCache, ymd(new Date()), walletsCache, cardsCache, scheduledCache); }
+function walletById(id) { return walletsCache.find(item => item.id === id) || null; }
+function cardById(id) { return cardsCache.find(item => item.id === id) || null; }
+function newEntityId(prefix = 'id') { return `${prefix}_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`.replace(/[^A-Za-z0-9_-]/g, '_'); }
+function installmentPlansForMonth(date) { return plannedForMonth(date).filter(item => item.installmentGroupId); }
+function transactionsWithInstallmentPlans(date) { return [...txCache, ...installmentPlansForMonth(date)]; }
+function metricsForMonth(date) { return monthMetrics(transactionsWithInstallmentPlans(date), date, recurringCache); }
+function spendingForMonth(date) { return periodSpendingMetrics(transactionsWithInstallmentPlans(date), recurringCache, date); }
 function timestampValue(value) { return value?.toMillis?.() ?? 0; }
 function dateFromMonthKey(key) {
   const [year, month] = String(key || '').split('-').map(Number);
@@ -183,6 +192,283 @@ function prepareUi() {
   installMonthlyGoalForm();
   installAnnualToggle();
   ensureWithdrawalDialog();
+  installAccountUi();
+  installTransactionRoutingUi();
+  installDebtFieldsUi();
+}
+
+
+function walletTypeLabel(type) {
+  return ({ checking:'Conta corrente', savings:'Poupança', cash:'Dinheiro', digital:'Conta digital', other:'Outra' })[type] || 'Carteira';
+}
+
+function debtKindLabel(type) {
+  return ({ vehicle_financing:'Financiamento veicular', mortgage:'Financiamento habitacional', installment:'Compra parcelada', personal_loan:'Empréstimo pessoal', student_loan:'Financiamento estudantil', other:'Outra dívida' })[type] || 'Dívida';
+}
+
+function accountOptions(rows, selected = '', emptyLabel = 'Selecione') {
+  const active = rows.filter(item => item.active !== false || item.id === selected);
+  return `<option value="">${emptyLabel}</option>${active.map(item => `<option value="${esc(item.id)}" ${item.id === selected ? 'selected' : ''}>${esc(item.institution)} · ${esc(item.name)}</option>`).join('')}`;
+}
+
+function refreshAccountSelects() {
+  const walletIds = ['transactionWalletId','recurringWalletId','scheduledWalletId','withdrawalWalletId','cardPaymentWalletId'];
+  walletIds.forEach(id => {
+    const select = $('#'+id);
+    if (!select) return;
+    const current = select.value;
+    select.innerHTML = accountOptions(walletsCache, current, walletsCache.some(item => item.active !== false) ? 'Selecione a carteira' : 'Cadastre uma carteira primeiro');
+    if (walletsCache.some(item => item.id === current)) select.value = current;
+  });
+  const cardSelect = $('#transactionCardId');
+  if (cardSelect) {
+    const current = cardSelect.value;
+    cardSelect.innerHTML = accountOptions(cardsCache, current, cardsCache.some(item => item.active !== false) ? 'Selecione o cartão' : 'Cadastre um cartão primeiro');
+    if (cardsCache.some(item => item.id === current)) cardSelect.value = current;
+  }
+  syncTransactionRouting();
+}
+
+function installAccountUi() {
+  if ($('#accountHub')) return;
+  const section = $('#patrimonySection');
+  const anchor = section?.querySelector('.metric-strip');
+  if (!section || !anchor) return;
+  const heroTitle = section.querySelector('.section-hero h2');
+  const heroText = section.querySelector('.section-hero p');
+  const navLabel = $('[data-page="patrimony"] small');
+  if (heroTitle) heroTitle.textContent = 'Carteiras & patrimônio';
+  if (heroText) heroText.textContent = 'Contas, cartões, ativos, reserva e obrigações em uma visão única.';
+  if (navLabel) navLabel.textContent = 'Carteiras';
+
+  const panel = document.createElement('article');
+  panel.id = 'accountHub';
+  panel.className = 'panel account-hub';
+  panel.innerHTML = `
+    <div class="panel-head account-head"><div><span class="card-kicker">CARTEIRAS</span><h2>Onde seu dinheiro está</h2><p class="muted">O saldo é calculado pelo saldo inicial + movimentações. Cartões baixam a carteira pagadora somente no vencimento.</p></div><div class="button-row"><button id="openWalletBtn" class="ghost-btn" type="button">+ Carteira</button><button id="openCardBtn" class="primary compact" type="button">+ Cartão</button></div></div>
+    <div class="account-summary"><div><span>Saldo em carteiras</span><strong id="walletsTotal">R$ 0</strong></div><div><span>Cartões em aberto</span><strong id="cardsOpenTotal">R$ 0</strong></div><div><span>Disponível líquido</span><strong id="accountsLiquid">R$ 0</strong></div></div>
+    <div class="account-section-title"><strong>Instituições e contas</strong><small id="walletCount" class="muted"></small></div><div id="walletCards" class="account-grid"></div>
+    <div class="account-section-title"><strong>Cartões de crédito</strong><small id="cardCount" class="muted"></small></div><div id="creditCardCards" class="account-grid"></div>
+    <div class="account-section-title"><strong>Compras parceladas</strong><small class="muted">parcelas futuras</small></div><div id="installmentGroups" class="installment-list"></div>`;
+  anchor.parentNode.insertBefore(panel, anchor);
+
+  const walletDialog = document.createElement('dialog');
+  walletDialog.id = 'walletDialog';
+  walletDialog.innerHTML = `<form id="walletForm" method="dialog" class="sheet-form"><input id="walletEditId" type="hidden"><div class="dialog-head"><div><span class="card-kicker">CARTEIRA</span><h2 id="walletDialogTitle">Nova carteira</h2></div><button type="button" class="icon-btn" data-close-account-dialog>×</button></div><label>Instituição<input id="walletInstitution" maxlength="60" required placeholder="Ex.: Nubank, Sicredi, Caixa"></label><label>Nome da conta<input id="walletName" maxlength="60" required placeholder="Ex.: Conta principal"></label><label>Tipo<select id="walletType"><option value="checking">Conta corrente</option><option value="digital">Conta digital</option><option value="savings">Poupança</option><option value="cash">Dinheiro</option><option value="other">Outra</option></select></label><label>Saldo inicial no app<input id="walletInitialBalance" type="number" step="0.01" required value="0"></label><p class="muted account-help">Use o saldo existente no momento em que começar a movimentar esta carteira no Meu Patrimônio. O saldo atual não é armazenado: ele é recalculado pelas movimentações.</p><button class="primary" type="submit">Salvar carteira</button></form>`;
+  document.body.appendChild(walletDialog);
+
+  const cardDialog = document.createElement('dialog');
+  cardDialog.id = 'cardDialog';
+  cardDialog.innerHTML = `<form id="cardForm" method="dialog" class="sheet-form"><input id="cardEditId" type="hidden"><div class="dialog-head"><div><span class="card-kicker">CARTÃO</span><h2 id="cardDialogTitle">Novo cartão</h2></div><button type="button" class="icon-btn" data-close-account-dialog>×</button></div><label>Instituição<input id="cardInstitution" maxlength="60" required placeholder="Ex.: Nubank"></label><label>Nome do cartão<input id="cardName" maxlength="60" required placeholder="Ex.: Mastercard Black"></label><label>Limite<input id="cardLimit" type="number" min="0" step="0.01" required></label><div class="form-grid two"><label>Fechamento<input id="cardClosingDay" type="number" min="1" max="31" required></label><label>Vencimento<input id="cardDueDay" type="number" min="1" max="31" required></label></div><label>Carteira que paga a fatura<select id="cardPaymentWalletId" required></select></label><p class="muted account-help">O cartão não cria um segundo saldo. Cada parcela reduz esta carteira no vencimento e permanece como dívida de cartão até lá.</p><button class="primary" type="submit">Salvar cartão</button></form>`;
+  document.body.appendChild(cardDialog);
+
+  $('#openWalletBtn').addEventListener('click', () => openWallet());
+  $('#openCardBtn').addEventListener('click', () => openCard());
+  $('#walletForm').addEventListener('submit', submitWallet);
+  $('#cardForm').addEventListener('submit', submitCard);
+  $('[data-close-account-dialog]').forEach(button => button.addEventListener('click', () => button.closest('dialog').close()));
+}
+
+function openWallet(wallet = null) {
+  $('#walletForm').reset();
+  $('#walletEditId').value = wallet?.id || '';
+  $('#walletDialogTitle').textContent = wallet ? 'Editar carteira' : 'Nova carteira';
+  $('#walletInstitution').value = wallet?.institution || '';
+  $('#walletName').value = wallet?.name || '';
+  $('#walletType').value = wallet?.type || 'checking';
+  $('#walletInitialBalance').value = wallet?.initialBalance ?? 0;
+  $('#walletDialog').showModal();
+}
+
+async function submitWallet(event) {
+  event.preventDefault();
+  await runAction(event.submitter, async () => {
+    const id = $('#walletEditId').value;
+    const institution = $('#walletInstitution').value.trim();
+    const name = $('#walletName').value.trim();
+    const type = $('#walletType').value;
+    const initialBalance = safeNumber($('#walletInitialBalance').value);
+    if (!institution || !name || !['checking','savings','cash','digital','other'].includes(type) || Math.abs(initialBalance) >= 1000000000) throw new Error('Carteira inválida');
+    const data = { institution, name, type, initialBalance, active:true, updatedAt:serverTimestamp() };
+    if (id) await updateDoc(userDoc('wallets', id), data);
+    else await addDoc(userCol('wallets'), { ...data, createdAt:serverTimestamp() });
+    $('#walletDialog').close();
+    await loadAll();
+  }, 'Carteira salva');
+}
+
+function openCard(card = null) {
+  if (!walletsCache.some(item => item.active !== false)) return toast('Cadastre uma carteira antes do cartão.');
+  $('#cardForm').reset();
+  $('#cardEditId').value = card?.id || '';
+  $('#cardDialogTitle').textContent = card ? 'Editar cartão' : 'Novo cartão';
+  $('#cardInstitution').value = card?.institution || '';
+  $('#cardName').value = card?.name || '';
+  $('#cardLimit').value = card?.creditLimit ?? '';
+  $('#cardClosingDay').value = card?.closingDay ?? 5;
+  $('#cardDueDay').value = card?.dueDay ?? 12;
+  $('#cardPaymentWalletId').innerHTML = accountOptions(walletsCache, card?.paymentWalletId || '', 'Selecione a carteira');
+  $('#cardPaymentWalletId').value = card?.paymentWalletId || walletsCache.find(item => item.active !== false)?.id || '';
+  $('#cardDialog').showModal();
+}
+
+async function submitCard(event) {
+  event.preventDefault();
+  await runAction(event.submitter, async () => {
+    const id = $('#cardEditId').value;
+    const institution = $('#cardInstitution').value.trim();
+    const name = $('#cardName').value.trim();
+    const creditLimit = safeNumber($('#cardLimit').value);
+    const closingDay = Math.trunc(safeNumber($('#cardClosingDay').value));
+    const dueDay = Math.trunc(safeNumber($('#cardDueDay').value));
+    const paymentWalletId = $('#cardPaymentWalletId').value;
+    if (!institution || !name || creditLimit < 0 || closingDay < 1 || closingDay > 31 || dueDay < 1 || dueDay > 31 || !walletById(paymentWalletId)) throw new Error('Cartão inválido');
+    const previous = id ? cardById(id) : null;
+    const data = { institution, name, creditLimit, closingDay, dueDay, paymentWalletId, active:true, updatedAt:serverTimestamp() };
+    if (id) await updateDoc(userDoc('cards', id), data);
+    else await addDoc(userCol('cards'), { ...data, createdAt:serverTimestamp() });
+    if (id && previous?.paymentWalletId && previous.paymentWalletId !== paymentWalletId) {
+      for (const scheduled of scheduledCache.filter(item => item.status === 'active' && item.cardId === id)) {
+        await updateDoc(userDoc('scheduled', scheduled.id), { walletId:paymentWalletId, updatedAt:serverTimestamp() });
+      }
+    }
+    $('#cardDialog').close();
+    await loadAll();
+  }, 'Cartão salvo');
+}
+
+function renderAccounts() {
+  if (!$('#accountHub')) return;
+  const today = ymd(new Date());
+  const wallets = walletMetrics(walletsCache, cardsCache, txCache, today);
+  const cards = cardDebtMetrics(cardsCache, txCache, scheduledCache, today);
+  $('#walletsTotal').textContent = currency.format(wallets.total);
+  $('#cardsOpenTotal').textContent = currency.format(cards.total);
+  $('#accountsLiquid').textContent = currency.format(wallets.total - cards.total);
+  $('#walletCount').textContent = `${walletsCache.filter(item => item.active !== false).length} ativas`;
+  $('#cardCount').textContent = `${cardsCache.filter(item => item.active !== false).length} ativos`;
+  $('#walletCards').innerHTML = wallets.byWallet.map(item => `<div class="account-card ${item.active === false ? 'inactive' : ''}"><div class="account-card-top"><div class="account-logo">🏦</div><div><strong>${esc(item.name)}</strong><small>${esc(item.institution)} · ${walletTypeLabel(item.type)}</small></div></div><div class="account-balance"><span>Saldo atual</span><strong class="${item.balance < 0 ? 'expense' : ''}">${currency.format(item.balance)}</strong></div><div class="row-actions"><button class="mini-btn" data-edit-wallet="${item.id}">Editar</button><button class="mini-btn" data-toggle-wallet="${item.id}">${item.active === false ? 'Reativar' : 'Arquivar'}</button></div></div>`).join('') || '<div class="empty-state">Cadastre sua primeira instituição e conta.</div>';
+  $('#creditCardCards').innerHTML = cards.byCard.map(item => `<div class="account-card card-account ${item.active === false ? 'inactive' : ''}"><div class="account-card-top"><div class="account-logo">💳</div><div><strong>${esc(item.name)}</strong><small>${esc(item.institution)} · fecha dia ${item.closingDay} · vence dia ${item.dueDay}</small></div></div><div class="card-stats"><div><span>Em aberto</span><strong>${currency.format(item.open)}</strong></div><div><span>Próxima fatura</span><strong>${currency.format(item.nextInvoice)}</strong></div><div><span>Limite disponível</span><strong>${currency.format(item.availableLimit)}</strong></div></div><small class="muted">Pagamento: ${esc(walletById(item.paymentWalletId)?.name || 'Carteira não localizada')}${item.nextDue ? ` · próximo vencimento ${formatDate(item.nextDue)}` : ''}</small><div class="row-actions"><button class="mini-btn" data-edit-card="${item.id}">Editar</button><button class="mini-btn" data-toggle-card="${item.id}">${item.active === false ? 'Reativar' : 'Arquivar'}</button></div></div>`).join('') || '<div class="empty-state">Nenhum cartão cadastrado.</div>';
+
+  const groups = new Map();
+  scheduledCache.filter(item => item.installmentGroupId).forEach(item => {
+    const key = item.installmentGroupId;
+    if (!groups.has(key)) groups.set(key, { id:key, description:item.description || item.name, cardId:item.cardId, total:item.installmentTotal || 1, active:[], posted:[] });
+    if (item.status === 'active') groups.get(key).active.push(item);
+  });
+  txCache.filter(item => item.installmentGroupId).forEach(item => {
+    const key = item.installmentGroupId;
+    if (!groups.has(key)) groups.set(key, { id:key, description:item.description || item.category, cardId:item.cardId, total:item.installmentTotal || 1, active:[], posted:[] });
+    groups.get(key).posted.push(item);
+  });
+  const groupRows = [...groups.values()].filter(group => group.active.length).sort((a,b) => String(a.active[0]?.dueDate || '').localeCompare(String(b.active[0]?.dueDate || '')));
+  $('#installmentGroups').innerHTML = groupRows.map(group => {
+    const active = group.active.sort((a,b) => String(a.dueDate).localeCompare(String(b.dueDate)));
+    const remaining = active.reduce((sum,item) => sum + safeNumber(item.amount),0);
+    const paid = new Set(group.posted.map(item => item.installmentNumber).filter(Boolean)).size;
+    const card = cardById(group.cardId);
+    return `<div class="installment-row"><div><strong>${esc(group.description || 'Compra parcelada')}</strong><small>${esc(card?.name || 'Cartão')} · ${paid}/${group.total} pagas · próxima ${formatDate(active[0]?.dueDate)}</small></div><div><strong>${currency.format(remaining)}</strong><small>saldo parcelado</small></div><button class="mini-btn danger" data-delete-installment-group="${esc(group.id)}">Excluir futuras</button></div>`;
+  }).join('') || '<div class="empty-state">Nenhuma compra parcelada em aberto.</div>';
+  refreshAccountSelects();
+}
+
+function installTransactionRoutingUi() {
+  if ($('#transactionRouting')) return;
+  const form = $('#transactionForm');
+  const recurringLabel = $('#transactionRecurring')?.closest('label');
+  if (!form || !recurringLabel) return;
+  const box = document.createElement('div');
+  box.id = 'transactionRouting';
+  box.className = 'routing-box';
+  box.innerHTML = `<label>Movimentar em<select id="transactionRoute"><option value="wallet">Carteira / conta</option><option value="card">Cartão de crédito</option><option value="none">Sem carteira (legado)</option></select></label><label id="transactionWalletLabel">Carteira<select id="transactionWalletId"></select></label><label id="transactionCardLabel" class="hidden">Cartão<select id="transactionCardId"></select></label><label id="transactionInstallmentsLabel" class="hidden">Parcelas<select id="transactionInstallments">${Array.from({length:60},(_,i)=>`<option value="${i+1}">${i+1}x</option>`).join('')}</select></label><small id="transactionRouteHint" class="muted routing-hint"></small>`;
+  form.insertBefore(box, recurringLabel);
+  $('#transactionRoute').addEventListener('change', syncTransactionRouting);
+  $('#transactionCardId').addEventListener('change', syncTransactionRouting);
+
+  const recurringForm = $('#recurringForm');
+  const recurringButton = recurringForm?.querySelector('button[type="submit"]');
+  if (recurringButton) {
+    const label = document.createElement('label'); label.innerHTML = 'Carteira<select id="recurringWalletId"></select>';
+    recurringForm.insertBefore(label, recurringButton);
+  }
+  const scheduledForm = $('#scheduledForm');
+  const scheduledButton = scheduledForm?.querySelector('button[type="submit"]');
+  if (scheduledButton) {
+    const label = document.createElement('label'); label.innerHTML = 'Carteira<select id="scheduledWalletId"></select>';
+    scheduledForm.insertBefore(label, scheduledButton);
+  }
+  const withdrawalButton = $('#withdrawalForm button[type="submit"]');
+  if (withdrawalButton && !$('#withdrawalWalletId')) {
+    const label = document.createElement('label'); label.innerHTML = 'Carteira de destino<select id="withdrawalWalletId"></select>';
+    withdrawalButton.parentNode.insertBefore(label, withdrawalButton);
+  }
+  refreshAccountSelects();
+}
+
+function syncTransactionRouting() {
+  if (!$('#transactionRoute')) return;
+  const type = $('#transactionType')?.value || 'expense';
+  let route = $('#transactionRoute').value;
+  if (type === 'income' && route === 'card') { route = walletsCache.some(item => item.active !== false) ? 'wallet' : 'none'; $('#transactionRoute').value = route; }
+  const cardMode = route === 'card' && type === 'expense';
+  $('#transactionWalletLabel')?.classList.toggle('hidden', route !== 'wallet');
+  $('#transactionCardLabel')?.classList.toggle('hidden', !cardMode);
+  $('#transactionInstallmentsLabel')?.classList.toggle('hidden', !cardMode);
+  const recurring = $('#transactionRecurring');
+  if (recurring) {
+    if (cardMode) recurring.checked = false;
+    recurring.disabled = !!$('#transactionEditId')?.value || cardMode;
+  }
+  const dateLabel = $('#transactionDate')?.closest('label');
+  if (dateLabel?.childNodes[0]) dateLabel.childNodes[0].textContent = cardMode ? 'Data da compra' : 'Data';
+  const hint = $('#transactionRouteHint');
+  if (hint) hint.textContent = cardMode ? 'O valor informado é o total da compra. As parcelas entram nos meses de vencimento da fatura e a carteira pagadora é movimentada automaticamente.' : route === 'wallet' ? 'Esta movimentação altera o saldo da carteira escolhida.' : 'Lançamentos sem carteira ficam fora dos saldos por instituição.';
+}
+
+function installDebtFieldsUi() {
+  if ($('#positionDebtFields')) return;
+  const form = $('#positionForm');
+  const submit = form?.querySelector('button[type="submit"]');
+  if (!form || !submit) return;
+  const box = document.createElement('div');
+  box.id = 'positionDebtFields';
+  box.className = 'debt-fields hidden';
+  box.innerHTML = `<span class="card-kicker">COMPOSIÇÃO DA DÍVIDA</span><label>Tipo da dívida<select id="debtKind"><option value="vehicle_financing">Financiamento veicular</option><option value="mortgage">Financiamento habitacional</option><option value="installment">Parcelado</option><option value="personal_loan">Empréstimo pessoal</option><option value="student_loan">Financiamento estudantil</option><option value="other">Outra</option></select></label><label>Instituição / credor<input id="debtInstitution" maxlength="60"></label><div class="form-grid two"><label>Valor original<input id="debtOriginalAmount" type="number" min="0" step="0.01"></label><label>Valor da parcela<input id="debtInstallmentAmount" type="number" min="0" step="0.01"></label><label>Total de parcelas<input id="debtTotalInstallments" type="number" min="1" max="1200"></label><label>Parcelas pagas<input id="debtPaidInstallments" type="number" min="0" max="1200"></label><label>Juros (% a.a.)<input id="debtInterestRate" type="number" min="0" max="100" step="0.01"></label><label>Dia do vencimento<input id="debtDueDay" type="number" min="1" max="31"></label></div><label>Observações<input id="debtNotes" maxlength="240"></label>`;
+  form.insertBefore(box, submit);
+  $('#positionType').addEventListener('change', syncDebtFields);
+  syncDebtFields();
+}
+
+function syncDebtFields() {
+  const debt = $('#positionType')?.value === 'debt';
+  $('#positionDebtFields')?.classList.toggle('hidden', !debt);
+  const valueLabel = $('#positionValue')?.closest('label');
+  if (valueLabel?.childNodes[0]) valueLabel.childNodes[0].textContent = debt ? 'Saldo devedor atual' : 'Valor atual';
+}
+
+function nullableNumber(id, integer = false) {
+  const value = $('#'+id)?.value;
+  if (value === '' || value == null) return null;
+  const number = safeNumber(value);
+  return integer ? Math.trunc(number) : number;
+}
+
+function readDebtFields(type) {
+  if (type !== 'debt') return { debtKind:null, institution:null, originalAmount:null, installmentAmount:null, totalInstallments:null, paidInstallments:null, interestRate:null, dueDay:null, notes:null };
+  const totalInstallments = nullableNumber('debtTotalInstallments', true);
+  const paidInstallments = nullableNumber('debtPaidInstallments', true);
+  if (totalInstallments != null && paidInstallments != null && paidInstallments > totalInstallments) throw new Error('Parcelas pagas não podem superar o total');
+  return {
+    debtKind: $('#debtKind').value || 'other',
+    institution: $('#debtInstitution').value.trim() || null,
+    originalAmount: nullableNumber('debtOriginalAmount'),
+    installmentAmount: nullableNumber('debtInstallmentAmount'),
+    totalInstallments,
+    paidInstallments,
+    interestRate: nullableNumber('debtInterestRate'),
+    dueDay: nullableNumber('debtDueDay', true),
+    notes: $('#debtNotes').value.trim() || null
+  };
 }
 
 function installTransactionPeriodFilter() {
@@ -243,7 +529,7 @@ function loadMonthlyGoalForm() {
   if (!key) return;
   const goal = monthlyGoalsCache.find(item => item.id === key || item.month === key);
   const date = dateFromMonthKey(key);
-  const metrics = date ? monthMetrics(txCache, date, recurringCache) : null;
+  const metrics = date ? metricsForMonth(date) : null;
   const spendingGoal = monthlySpendingGoal(metrics?.income);
   $('#monthlyGoalContribution').value = goal?.monthlySurplusGoal ?? '';
   $('#monthlySpendingGoalInfo').textContent = metrics?.income > 0
@@ -297,6 +583,7 @@ function openWithdrawal() {
   $('#withdrawalDate').value = today;
   $('#withdrawalDate').max = today;
   $('#withdrawalAvailable').textContent = `Disponível hoje: ${currency.format(available)}`;
+  if ($('#withdrawalWalletId')) $('#withdrawalWalletId').value = walletsCache.find(item => item.active !== false)?.id || '';
   $('#withdrawalDialog').showModal();
 }
 
@@ -313,7 +600,7 @@ async function submitWithdrawal(event) {
     if (amount > available) throw new Error(`Valor acima do disponível (${currency.format(available)})`);
     await addDoc(userCol('transactions'), {
       type: 'income', amount, category: WITHDRAWAL_CATEGORY, description, date,
-      recurring: false, createdAt: serverTimestamp()
+      walletId: $('#withdrawalWalletId')?.value || null, cardId:null, recurring: false, createdAt: serverTimestamp()
     });
     $('#withdrawalDialog').close();
     await loadAll();
@@ -464,16 +751,20 @@ async function processAutomations() {
 
 async function loadAll() {
   await ensureUserRoot();
-  const [transactions, positions, planning, monthlyGoals] = await Promise.all([
+  const [transactions, positions, planning, monthlyGoals, wallets, cards] = await Promise.all([
     loadCollection('transactions','date','desc'),
     loadCollection('positions','createdAt','desc'),
     getDoc(userDoc('config','planning')),
-    loadCollection('monthlyGoals','month','desc')
+    loadCollection('monthlyGoals','month','desc'),
+    loadCollection('wallets','createdAt','asc'),
+    loadCollection('cards','createdAt','asc')
   ]);
   txCache = transactions;
   positionsCache = positions;
   settings = planning.exists() ? planning.data() : {};
   monthlyGoalsCache = monthlyGoals;
+  walletsCache = wallets;
+  cardsCache = cards;
 
   try {
     [recurringCache, scheduledCache] = await Promise.all([
@@ -511,15 +802,16 @@ function renderAll() {
   renderAnnual();
   renderAgenda();
   renderPositions();
+  renderAccounts();
   renderPlanning();
 }
 
 function renderDashboard() {
-  const metrics = monthMetrics(txCache, selectedMonth, recurringCache);
+  const metrics = metricsForMonth(selectedMonth);
   const positions = calcPositions();
   const goal = goalFor(selectedMonth);
   const prevDate = new Date(selectedMonth); prevDate.setMonth(prevDate.getMonth() - 1);
-  const prev = monthMetrics(txCache, prevDate, recurringCache);
+  const prev = metricsForMonth(prevDate);
   const reserve = reserveMetrics({
     reserve: positions.reserve,
     transactions: txCache,
@@ -527,7 +819,7 @@ function renderDashboard() {
     todayYmd: ymd(new Date()),
     targetMonths: safeNumber(settings.reserveTargetMonths) || 6
   });
-  const spending = periodSpendingMetrics(txCache, recurringCache, selectedMonth);
+  const spending = spendingForMonth(selectedMonth);
   const spendingGoal = monthlySpendingGoal(metrics.income);
   const contributionGoal = safeNumber(goal?.monthlySurplusGoal);
   const score = scoreMetrics({
@@ -636,13 +928,19 @@ function renderScoreAndPet(score, context) {
 }
 
 function txRow(tx) {
-  const source = tx.sourceType === 'recurring' ? (tx.projected ? ' · recorrente prevista' : ' · recorrente') : tx.sourceType === 'scheduled' ? ' · agendada' : '';
+  const wallet = walletById(tx.walletId);
+  const card = cardById(tx.cardId);
+  const installment = tx.installmentTotal ? ` · ${tx.installmentNumber}/${tx.installmentTotal}` : '';
+  const account = card ? ` · ${esc(card.name)}` : wallet ? ` · ${esc(wallet.name)}` : '';
+  const source = tx.sourceType === 'recurring' ? (tx.projected ? ' · recorrente prevista' : ' · recorrente') : tx.sourceType === 'scheduled' ? (tx.projected ? ' · prevista' : ' · agendada') : '';
   let actions = '';
-  if (isWithdrawal(tx)) actions = `<button class="mini-btn danger" data-delete-tx="${tx.id}">Excluir</button>`;
+  if (tx.projected) actions = '<span class="muted">Previsto</span>';
+  else if (tx.installmentGroupId) actions = '<span class="muted">Parcela</span>';
+  else if (isWithdrawal(tx)) actions = `<button class="mini-btn danger" data-delete-tx="${tx.id}">Excluir</button>`;
   else if (tx.sourceType === 'scheduled') actions = `<button class="mini-btn" data-edit-tx="${tx.id}">Editar</button><span class="muted">Agendado</span>`;
   else if (tx.sourceType) actions = '<span class="muted">Automático</span>';
   else actions = `<button class="mini-btn" data-edit-tx="${tx.id}">Editar</button><button class="mini-btn danger" data-delete-tx="${tx.id}">Excluir</button>`;
-  return `<div class="list-row"><div class="list-icon">${tx.type === 'expense' ? '−' : '+'}</div><div class="list-main"><strong>${esc(tx.description || tx.category)}</strong><small>${esc(tx.category)} · ${formatDate(tx.date)}${source}${isContribution(tx) ? ' · aporte' : ''}${isWithdrawal(tx) ? ' · resgate patrimonial' : ''}</small></div><div><div class="money ${tx.type}">${tx.type === 'expense' ? '−' : '+'}${currency.format(safeNumber(tx.amount))}</div><div class="row-actions">${actions}</div></div></div>`;
+  return `<div class="list-row"><div class="list-icon">${tx.type === 'expense' ? '−' : '+'}</div><div class="list-main"><strong>${esc(tx.description || tx.category)}</strong><small>${esc(tx.category)} · ${formatDate(tx.date)}${source}${installment}${account}${isContribution(tx) ? ' · aporte' : ''}${isWithdrawal(tx) ? ' · resgate patrimonial' : ''}</small></div><div><div class="money ${tx.type}">${tx.type === 'expense' ? '−' : '+'}${currency.format(safeNumber(tx.amount))}</div><div class="row-actions">${actions}</div></div></div>`;
 }
 
 function renderTransactions() {
@@ -651,7 +949,7 @@ function renderTransactions() {
   const dateFrom = $('#txDateFrom')?.value || '';
   const dateTo = $('#txDateTo')?.value || '';
   let list = txCache.slice().sort((a,b) => String(b.date).localeCompare(String(a.date)));
-  if (!dateFrom && !dateTo) list = monthMetrics(txCache, selectedMonth, recurringCache).rows.slice().sort((a,b) => String(b.date).localeCompare(String(a.date)));
+  if (!dateFrom && !dateTo) list = metricsForMonth(selectedMonth).rows.slice().sort((a,b) => String(b.date).localeCompare(String(a.date)));
   if (dateFrom) list = list.filter(tx => String(tx.date || '') >= dateFrom);
   if (dateTo) list = list.filter(tx => String(tx.date || '') <= dateTo);
   if (type !== 'all') list = list.filter(tx => tx.type === type);
@@ -673,7 +971,7 @@ function renderCashflow() {
   const rows = [];
   for (let i = 5; i >= 0; i--) {
     const d = new Date(selectedMonth); d.setMonth(d.getMonth() - i);
-    const m = monthMetrics(txCache, d, recurringCache);
+    const m = metricsForMonth(d);
     rows.push({ label: d.toLocaleDateString('pt-BR',{month:'short'}).replace('.',''), income: m.income, expense: m.consumption });
   }
   $('#cashflowChart').innerHTML = barSvg(rows);
@@ -699,7 +997,7 @@ function renderDonut(metrics) {
 function renderInsights(metrics, positions, spending, spendingGoal, reserve) {
   const insights = [];
   const prev = new Date(selectedMonth); prev.setMonth(prev.getMonth() - 1);
-  const previous = monthMetrics(txCache, prev, recurringCache);
+  const previous = metricsForMonth(prev);
   if (previous.consumption > 0) {
     const delta = (metrics.consumption - previous.consumption) / previous.consumption * 100;
     insights.push([delta <= 0 ? '📉' : '📈', 'Gastos vs. mês anterior', `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}% de variação no consumo.`]);
@@ -752,7 +1050,7 @@ function plannedForMonth(date) {
     }
     if (!due || !due.startsWith(key)) return;
     const exists = txCache.some(tx => tx.id === scheduledTransactionId(scheduled, due));
-    if (!exists) out.push({ name: scheduled.name, amount: safeNumber(scheduled.amount), type: scheduled.type, date: due, category: scheduled.category, icon:'📅', sourceType:'scheduled', sourceId:scheduled.id });
+    if (!exists) out.push({ id:scheduledTransactionId(scheduled, due), name: scheduled.name, description:scheduled.description || scheduled.name, amount: safeNumber(scheduled.amount), type: scheduled.type, date: due, category: scheduled.category, icon:scheduled.installmentGroupId ? '💳' : '📅', sourceType:'scheduled', sourceId:scheduled.id, walletId:scheduled.walletId || null, cardId:scheduled.cardId || null, purchaseDate:scheduled.purchaseDate || null, installmentGroupId:scheduled.installmentGroupId || null, installmentNumber:scheduled.installmentNumber || null, installmentTotal:scheduled.installmentTotal || null, projected:true });
   });
   return out.sort((a,b) => a.date.localeCompare(b.date));
 }
@@ -832,18 +1130,16 @@ function renderAgenda() {
     return;
   }
   $('#automationNotice').classList.add('hidden');
+  const regularScheduled = scheduledCache.filter(item => !item.installmentGroupId);
+  const installmentGroups = new Set(scheduledCache.filter(item => item.status === 'active' && item.installmentGroupId).map(item => item.installmentGroupId));
   $('#recurringCount').textContent = `${recurringCache.filter(item => item.active).length} ativas`;
-  $('#scheduledCount').textContent = `${scheduledCache.filter(item => item.status === 'active').length} futuras`;
-  $('#recurringList').innerHTML = recurringCache.map(item => `<div class="agenda-item ${item.active ? '' : 'inactive'}"><div class="agenda-icon">🔁</div><div><strong>${esc(item.name)}</strong><small>${currency.format(safeNumber(item.amount))} · dia ${item.dayOfMonth} · ${esc(item.category)}</small></div><div class="agenda-actions"><button class="mini-btn" data-edit-rec="${item.id}">Editar</button><button class="mini-btn danger" data-del-rec="${item.id}">Excluir</button></div></div>`).join('') || '<div class="empty-state">Nenhuma recorrência.</div>';
-  $('#scheduledList').innerHTML = scheduledCache.map(item => {
+  $('#scheduledCount').textContent = `${regularScheduled.filter(item => item.status === 'active').length} futuras${installmentGroups.size ? ` · ${installmentGroups.size} parceladas` : ''}`;
+  $('#recurringList').innerHTML = recurringCache.map(item => `<div class="agenda-item ${item.active ? '' : 'inactive'}"><div class="agenda-icon">🔁</div><div><strong>${esc(item.name)}</strong><small>${currency.format(safeNumber(item.amount))} · dia ${item.dayOfMonth} · ${esc(item.category)}${walletById(item.walletId) ? ` · ${esc(walletById(item.walletId).name)}` : ''}</small></div><div class="agenda-actions"><button class="mini-btn" data-edit-rec="${item.id}">Editar</button><button class="mini-btn danger" data-del-rec="${item.id}">Excluir</button></div></div>`).join('') || '<div class="empty-state">Nenhuma recorrência.</div>';
+  $('#scheduledList').innerHTML = regularScheduled.map(item => {
     const postedTx = item.status === 'posted' ? latestScheduledTransaction(item.id) : null;
-    const editAction = item.status === 'active'
-      ? `<button class="mini-btn" data-edit-sch="${item.id}">Editar</button>`
-      : postedTx
-        ? `<button class="mini-btn" data-edit-tx="${postedTx.id}">Editar lançamento</button>`
-        : '';
-    return `<div class="agenda-item ${item.status === 'active' ? '' : 'inactive'}"><div class="agenda-icon">📅</div><div><strong>${esc(item.name)}</strong><small>${currency.format(safeNumber(item.amount))} · ${formatDate(item.dueDate)} · ${item.frequency === 'annual' ? 'anual' : item.status === 'posted' ? 'lançada' : 'uma vez'}</small></div><div class="agenda-actions">${editAction}<button class="mini-btn danger" data-del-sch="${item.id}">Excluir</button></div></div>`;
-  }).join('') || '<div class="empty-state">Nenhuma conta agendada.</div>';
+    const editAction = item.status === 'active' ? `<button class="mini-btn" data-edit-sch="${item.id}">Editar</button>` : postedTx ? `<button class="mini-btn" data-edit-tx="${postedTx.id}">Editar lançamento</button>` : '';
+    return `<div class="agenda-item ${item.status === 'active' ? '' : 'inactive'}"><div class="agenda-icon">📅</div><div><strong>${esc(item.name)}</strong><small>${currency.format(safeNumber(item.amount))} · ${formatDate(item.dueDate)} · ${item.frequency === 'annual' ? 'anual' : item.status === 'posted' ? 'lançada' : 'uma vez'}${walletById(item.walletId) ? ` · ${esc(walletById(item.walletId).name)}` : ''}</small></div><div class="agenda-actions">${editAction}<button class="mini-btn danger" data-del-sch="${item.id}">Excluir</button></div></div>`;
+  }).join('') || '<div class="empty-state">Nenhuma conta agendada. Parcelamentos ficam em Carteiras.</div>';
 }
 
 function renderPositions() {
@@ -856,7 +1152,18 @@ function renderPositions() {
   const autoRow = hasContributionHistory
     ? `<div class="list-row"><div class="list-icon">↗</div><div class="list-main"><strong>Patrimônio por aportes</strong><small>Automático · integra a reserva de emergência · aportes realizados menos resgates</small></div><div><div class="money income">${currency.format(positions.contributionAssets)}</div><div class="row-actions"><button class="mini-btn" type="button" data-withdraw-contribution ${positions.contributionAssets > 0 ? '' : 'disabled'}>Mover para saldo</button></div></div></div>`
     : '';
-  const manualRows = positionsCache.map(item => `<div class="list-row"><div class="list-icon">${item.type === 'debt' ? '−' : '+'}</div><div class="list-main"><strong>${esc(item.name)}</strong><small>${item.type === 'debt' ? 'Dívida' : item.type === 'reserve' ? 'Reserva' : 'Ativo'}</small></div><div><div class="money ${item.type === 'debt' ? 'expense' : 'income'}">${currency.format(safeNumber(item.value))}</div><div class="row-actions"><button class="mini-btn" data-edit-position="${item.id}">Editar</button><button class="mini-btn danger" data-delete-position="${item.id}">Excluir</button></div></div></div>`).join('');
+  const manualRows = positionsCache.map(item => {
+    const debt = item.type === 'debt';
+    const parts = [];
+    if (debt && item.debtKind) parts.push(debtKindLabel(item.debtKind));
+    if (debt && item.institution) parts.push(esc(item.institution));
+    if (debt && item.totalInstallments) parts.push(`${safeNumber(item.paidInstallments)} de ${safeNumber(item.totalInstallments)} parcelas pagas`);
+    if (debt && safeNumber(item.installmentAmount) > 0) parts.push(`parcela ${currency.format(safeNumber(item.installmentAmount))}`);
+    if (debt && safeNumber(item.dueDay) > 0) parts.push(`vence dia ${safeNumber(item.dueDay)}`);
+    const detail = debt ? (parts.join(' · ') || 'Dívida') : item.type === 'reserve' ? 'Reserva' : 'Ativo';
+    const progress = debt && item.totalInstallments ? clamp(safeNumber(item.paidInstallments) / safeNumber(item.totalInstallments), 0, 1) : null;
+    return `<div class="list-row debt-row"><div class="list-icon">${debt ? '−' : '+'}</div><div class="list-main"><strong>${esc(item.name)}</strong><small>${detail}</small>${progress != null ? `<div class="debt-progress"><i style="width:${progress * 100}%"></i></div>` : ''}</div><div><div class="money ${debt ? 'expense' : 'income'}">${currency.format(safeNumber(item.value))}</div><div class="row-actions"><button class="mini-btn" data-edit-position="${item.id}">Editar</button><button class="mini-btn danger" data-delete-position="${item.id}">Excluir</button></div></div></div>`;
+  }).join('');
   $('#positionsList').innerHTML = autoRow + manualRows || '<div class="empty-state">Nenhuma posição.</div>';
   $('#positionsList').classList.toggle('empty-state', !(autoRow || manualRows));
 }
@@ -887,10 +1194,12 @@ function fillCategories(select, type, current) {
 function setTxType(type, currentCategory) {
   $('#transactionType').value = type;
   fillCategories($('#transactionCategory'), type, currentCategory);
-  $$('[data-tx-type]').forEach(button => button.classList.toggle('selected', button.dataset.txType === type));
+  $('[data-tx-type]').forEach(button => button.classList.toggle('selected', button.dataset.txType === type));
+  syncTransactionRouting();
 }
 
 function openTransaction(tx = null) {
+  if (tx?.installmentGroupId) return toast('Compras parceladas são gerenciadas em Carteiras & patrimônio.');
   if (tx && (tx.sourceType === 'recurring' || tx.projected || isWithdrawal(tx))) return;
   $('#transactionForm').reset();
   $('#transactionEditId').value = tx?.id || '';
@@ -901,9 +1210,15 @@ function openTransaction(tx = null) {
   $('#transactionDescription').value = tx?.description || '';
   $('#transactionDate').value = tx?.date || ymd(new Date());
   $('#transactionRecurring').checked = !!tx?.recurring;
+  const defaultWallet = tx?.walletId || walletsCache.find(item => item.active !== false)?.id || '';
+  $('#transactionRoute').value = tx?.cardId ? 'card' : defaultWallet ? 'wallet' : 'none';
+  $('#transactionWalletId').value = defaultWallet;
+  $('#transactionCardId').value = tx?.cardId || cardsCache.find(item => item.active !== false)?.id || '';
+  $('#transactionInstallments').value = String(tx?.installmentTotal || 1);
   $('#transactionRecurring').disabled = !!tx;
   const recurringLabel = $('#transactionRecurring').closest('label');
   if (recurringLabel) recurringLabel.style.display = tx ? 'none' : '';
+  syncTransactionRouting();
   $('#transactionDialog').showModal();
 }
 
@@ -914,6 +1229,16 @@ function openPosition(position = null) {
   $('#positionType').value = position?.type || 'asset';
   $('#positionName').value = position?.name || '';
   $('#positionValue').value = position?.value ?? '';
+  $('#debtKind').value = position?.debtKind || 'vehicle_financing';
+  $('#debtInstitution').value = position?.institution || '';
+  $('#debtOriginalAmount').value = position?.originalAmount ?? '';
+  $('#debtInstallmentAmount').value = position?.installmentAmount ?? '';
+  $('#debtTotalInstallments').value = position?.totalInstallments ?? '';
+  $('#debtPaidInstallments').value = position?.paidInstallments ?? '';
+  $('#debtInterestRate').value = position?.interestRate ?? '';
+  $('#debtDueDay').value = position?.dueDay ?? '';
+  $('#debtNotes').value = position?.notes || '';
+  syncDebtFields();
   $('#positionDialog').showModal();
 }
 
@@ -929,6 +1254,7 @@ function openRecurring(item = null) {
   $('#recurringStart').value = item?.startDate || ymd(new Date());
   $('#recurringEnd').value = item?.endDate || '';
   $('#recurringActive').checked = item ? !!item.active : true;
+  if ($('#recurringWalletId')) $('#recurringWalletId').value = item?.walletId || walletsCache.find(row => row.active !== false)?.id || '';
   $('#recurringDialog').showModal();
 }
 
@@ -942,6 +1268,7 @@ function openScheduled(item = null) {
   $('#scheduledAmount').value = item?.amount ?? '';
   $('#scheduledDue').value = item?.dueDate || ymd(new Date());
   $('#scheduledFrequency').value = item?.frequency || 'once';
+  if ($('#scheduledWalletId')) $('#scheduledWalletId').value = item?.walletId || walletsCache.find(row => row.active !== false)?.id || '';
   $('#scheduledDialog').showModal();
 }
 
@@ -994,23 +1321,44 @@ $('#transactionForm').addEventListener('submit', async event => {
     const category = $('#transactionCategory').value;
     const description = $('#transactionDescription').value.trim();
     const date = $('#transactionDate').value;
+    const route = $('#transactionRoute')?.value || 'none';
     if (!(amount > 0) || !['income','expense'].includes(type) || !category || !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('Lançamento inválido');
     if (id) {
-      await updateDoc(userDoc('transactions', id), { type, amount, category, description, date });
+      const walletId = route === 'wallet' ? $('#transactionWalletId').value || null : null;
+      if (walletsCache.some(item => item.active !== false) && route === 'wallet' && !walletId) throw new Error('Selecione a carteira');
+      await updateDoc(userDoc('transactions', id), { type, amount, category, description, date, walletId, cardId:null });
+    } else if (route === 'card') {
+      if (type !== 'expense') throw new Error('Cartão aceita apenas despesas');
+      const card = cardById($('#transactionCardId').value);
+      const installments = Math.trunc(safeNumber($('#transactionInstallments').value || 1));
+      if (!card || card.active === false || installments < 1 || installments > 60) throw new Error('Cartão ou parcelamento inválido');
+      const schedule = cardInstallmentSchedule({ amount, installments, purchaseDate:date, closingDay:card.closingDay, dueDay:card.dueDay });
+      if (schedule.length !== installments) throw new Error('O valor é baixo demais para a quantidade de parcelas');
+      const groupId = newEntityId('grp');
+      for (const part of schedule) {
+        const scheduledId = `inst_${groupId}_${String(part.installmentNumber).padStart(3,'0')}`;
+        await setDoc(userDoc('scheduled', scheduledId), {
+          name: `${description || category} · ${part.installmentNumber}/${part.installmentTotal}`,
+          type:'expense', amount:part.amount, category, description:description || category,
+          dueDate:part.date, frequency:'once', status:'active',
+          walletId:card.paymentWalletId, cardId:card.id, purchaseDate:date,
+          installmentGroupId:groupId, installmentNumber:part.installmentNumber, installmentTotal:part.installmentTotal,
+          createdAt:serverTimestamp(), updatedAt:serverTimestamp()
+        });
+      }
     } else {
+      const walletId = route === 'wallet' ? $('#transactionWalletId').value || null : null;
+      if (walletsCache.some(item => item.active !== false) && route !== 'wallet') throw new Error('Selecione uma carteira para o lançamento');
+      if (route === 'wallet' && !walletId) throw new Error('Selecione a carteira');
       const recurring = $('#transactionRecurring').checked;
-      const ref = await addDoc(userCol('transactions'), { type, amount, category, description, date, recurring, createdAt: serverTimestamp() });
+      const ref = await addDoc(userCol('transactions'), { type, amount, category, description, date, walletId, cardId:null, recurring, createdAt: serverTimestamp() });
       if (recurring && agendaAvailable) {
         const day = Number(date.slice(8,10));
         await setDoc(userDoc('recurring', `legacy_${ref.id}`), {
           name: description || category,
           type, amount, category, description,
-          dayOfMonth: day,
-          startDate: date,
-          endDate: '',
-          active: true,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
+          dayOfMonth: day, startDate: date, endDate: '', active: true, walletId,
+          createdAt: serverTimestamp(), updatedAt: serverTimestamp()
         });
       }
     }
@@ -1027,8 +1375,9 @@ $('#positionForm').addEventListener('submit', async event => {
     const name = $('#positionName').value.trim();
     const value = safeNumber($('#positionValue').value);
     if (!['asset','reserve','debt'].includes(type) || !name || value < 0) throw new Error('Posição inválida');
-    if (id) await updateDoc(userDoc('positions', id), { type, name, value });
-    else await addDoc(userCol('positions'), { type, name, value, createdAt: serverTimestamp() });
+    const data = { type, name, value, ...readDebtFields(type) };
+    if (id) await updateDoc(userDoc('positions', id), data);
+    else await addDoc(userCol('positions'), { ...data, createdAt: serverTimestamp() });
     $('#positionDialog').close();
     await loadAll();
   }, $('#positionEditId').value ? 'Posição atualizada' : 'Posição salva');
@@ -1068,7 +1417,9 @@ $('#recurringForm').addEventListener('submit', async event => {
     const endDate = $('#recurringEnd').value || '';
     const active = $('#recurringActive').checked;
     if (!name || !(amount > 0) || !['income','expense'].includes(type) || dayOfMonth < 1 || dayOfMonth > 31 || !startDate || (endDate && endDate < startDate)) throw new Error('Recorrência inválida');
-    const data = { name, type, amount, category, description: name, dayOfMonth, startDate, endDate, active, updatedAt: serverTimestamp() };
+    const walletId = $('#recurringWalletId')?.value || null;
+    if (walletsCache.some(item => item.active !== false) && !walletId) throw new Error('Selecione a carteira da recorrência');
+    const data = { name, type, amount, category, description: name, dayOfMonth, startDate, endDate, active, walletId, cardId:null, updatedAt: serverTimestamp() };
     if (id) await updateDoc(userDoc('recurring', id), data);
     else await addDoc(userCol('recurring'), { ...data, createdAt: serverTimestamp() });
     $('#recurringDialog').close();
@@ -1087,7 +1438,9 @@ $('#scheduledForm').addEventListener('submit', async event => {
     const dueDate = $('#scheduledDue').value;
     const frequency = $('#scheduledFrequency').value;
     if (!name || !(amount > 0) || !['income','expense'].includes(type) || !dueDate || !['once','annual'].includes(frequency)) throw new Error('Agendamento inválido');
-    const data = { name, type, amount, category, description: name, dueDate, frequency, status:'active', updatedAt: serverTimestamp() };
+    const walletId = $('#scheduledWalletId')?.value || null;
+    if (walletsCache.some(item => item.active !== false) && !walletId) throw new Error('Selecione a carteira do compromisso');
+    const data = { name, type, amount, category, description: name, dueDate, frequency, status:'active', walletId, cardId:null, updatedAt: serverTimestamp() };
     if (id) await updateDoc(userDoc('scheduled', id), data);
     else await addDoc(userCol('scheduled'), { ...data, createdAt: serverTimestamp() });
     $('#scheduledDialog').close();
@@ -1107,6 +1460,26 @@ document.addEventListener('click', async event => {
   }
   const withdraw = target.closest?.('[data-withdraw-contribution]');
   if (withdraw) { event.preventDefault(); openWithdrawal(); return; }
+  if (target.dataset.editWallet) return openWallet(walletById(target.dataset.editWallet));
+  if (target.dataset.editCard) return openCard(cardById(target.dataset.editCard));
+  if (target.dataset.toggleWallet) {
+    const wallet = walletById(target.dataset.toggleWallet);
+    if (!wallet) return;
+    if (wallet.active !== false && cardsCache.some(card => card.active !== false && card.paymentWalletId === wallet.id)) return toast('Altere primeiro a carteira de pagamento dos cartões ativos.');
+    await runAction(target, async () => { await updateDoc(userDoc('wallets', wallet.id), { active:wallet.active === false, updatedAt:serverTimestamp() }); await loadAll(); }, wallet.active === false ? 'Carteira reativada' : 'Carteira arquivada');
+    return;
+  }
+  if (target.dataset.toggleCard) {
+    const card = cardById(target.dataset.toggleCard);
+    if (!card) return;
+    await runAction(target, async () => { await updateDoc(userDoc('cards', card.id), { active:card.active === false, updatedAt:serverTimestamp() }); await loadAll(); }, card.active === false ? 'Cartão reativado' : 'Cartão arquivado');
+    return;
+  }
+  if (target.dataset.deleteInstallmentGroup && confirm('Excluir todas as parcelas futuras desta compra? Parcelas já lançadas permanecem no histórico.')) {
+    const groupId = target.dataset.deleteInstallmentGroup;
+    await runAction(target, async () => { for (const item of scheduledCache.filter(row => row.status === 'active' && row.installmentGroupId === groupId)) await deleteDoc(userDoc('scheduled', item.id)); await loadAll(); }, 'Parcelas futuras excluídas');
+    return;
+  }
   if (target.dataset.editTx) return openTransaction(txCache.find(item => item.id === target.dataset.editTx));
   if (target.dataset.editPosition) return openPosition(positionsCache.find(item => item.id === target.dataset.editPosition));
   if (target.dataset.editRec) return openRecurring(recurringCache.find(item => item.id === target.dataset.editRec));
@@ -1128,8 +1501,10 @@ function exportExcel() {
     annual.push([monthLabel(date), m.income, m.consumption, monthlySpendingGoal(m.income), m.grossContribution, m.withdrawal, m.contribution, m.balance, m.contributionRate ?? 0]);
   }
   const positions = calcPositions();
-  const positionRows = positionsCache.map(p => [p.type, p.name, safeNumber(p.value)]);
-  positionRows.push(['asset','Patrimônio por aportes (automático)', positions.contributionAssets]);
+  const positionRows = positionsCache.map(p => [p.type, p.name, safeNumber(p.value), p.debtKind ? debtKindLabel(p.debtKind) : '', p.institution || '', safeNumber(p.originalAmount), safeNumber(p.installmentAmount), p.totalInstallments || '', p.paidInstallments || '', safeNumber(p.interestRate), p.dueDay || '', p.notes || '']);
+  positionRows.push(['asset','Patrimônio por aportes (automático)', positions.contributionAssets,'','','','','','','','','']);
+  const walletRows = walletMetrics(walletsCache, cardsCache, txCache, ymd(new Date())).byWallet.map(w => [w.institution,w.name,walletTypeLabel(w.type),safeNumber(w.initialBalance),safeNumber(w.balance),w.active === false ? 'Arquivada' : 'Ativa']);
+  const cardRows = cardDebtMetrics(cardsCache, txCache, scheduledCache, ymd(new Date())).byCard.map(c => [c.institution,c.name,safeNumber(c.creditLimit),safeNumber(c.open),safeNumber(c.nextInvoice),safeNumber(c.availableLimit),c.closingDay,c.dueDay,walletById(c.paymentWalletId)?.name || '',c.active === false ? 'Arquivado' : 'Ativo']);
   const goalRows = monthlyGoalsCache.map(g => {
     const key = g.month || g.id;
     const date = dateFromMonthKey(key);
@@ -1141,12 +1516,17 @@ function exportExcel() {
       ['Ativos totais', positions.assets],
       ['Reserva cadastrada', positions.manualReserve],
       ['Patrimônio por aportes', positions.contributionAssets],
+      ['Saldo em carteiras', positions.walletAssets],
+      ['Dívidas manuais', positions.manualDebts],
+      ['Cartões em aberto', positions.cardDebts],
       ['Reserva total (cadastrada + aportes)', positions.reserve],
       ['Dívidas', positions.debts],
       ['Patrimônio líquido', positions.netWorth]
     ]),
-    sheetXml('Lançamentos',['Data','Tipo','Categoria','Descrição','Valor','Origem'],txCache.map(tx => [tx.date,tx.type,tx.category,tx.description || '',safeNumber(tx.amount),tx.sourceType || 'manual'])),
-    sheetXml('Patrimônio',['Tipo','Nome','Valor'],positionRows),
+    sheetXml('Lançamentos',['Data','Tipo','Categoria','Descrição','Valor','Origem','Carteira','Cartão','Parcela'],txCache.map(tx => [tx.date,tx.type,tx.category,tx.description || '',safeNumber(tx.amount),tx.sourceType || 'manual',walletById(tx.walletId)?.name || '',cardById(tx.cardId)?.name || '',tx.installmentTotal ? `${tx.installmentNumber}/${tx.installmentTotal}` : ''])),
+    sheetXml('Carteiras',['Instituição','Nome','Tipo','Saldo inicial','Saldo atual','Status'],walletRows),
+    sheetXml('Cartões',['Instituição','Nome','Limite','Em aberto','Próxima fatura','Limite disponível','Fechamento','Vencimento','Carteira pagadora','Status'],cardRows),
+    sheetXml('Patrimônio',['Tipo','Nome','Valor atual','Composição','Instituição','Valor original','Parcela','Total parcelas','Pagas','Juros a.a.','Vencimento','Observações'],positionRows),
     sheetXml('Recorrentes',['Nome','Tipo','Categoria','Valor','Dia','Início','Fim','Ativa'],recurringCache.map(r => [r.name,r.type,r.category,safeNumber(r.amount),r.dayOfMonth,r.startDate,r.endDate || '',r.active ? 'Sim' : 'Não'])),
     sheetXml('Agendadas',['Nome','Tipo','Categoria','Valor','Vencimento','Frequência','Status'],scheduledCache.map(s => [s.name,s.type,s.category,safeNumber(s.amount),s.dueDate,s.frequency,s.status])),
     sheetXml('Metas mensais',['Mês','Meta de aporte','Renda do mês','Meta de gasto mensal (60%)'],goalRows),
@@ -1173,7 +1553,7 @@ onAuthStateChanged(auth, async current => {
     try { await loadAll(); }
     catch (error) { console.error(error); toast('Falha ao carregar os dados. Atualize a página.'); }
   } else {
-    txCache = []; positionsCache = []; recurringCache = []; scheduledCache = []; monthlyGoalsCache = []; settings = {};
+    txCache = []; positionsCache = []; recurringCache = []; scheduledCache = []; walletsCache = []; cardsCache = []; monthlyGoalsCache = []; settings = {};
     $('#authView').classList.remove('hidden');
     $('#appView').classList.add('hidden');
   }

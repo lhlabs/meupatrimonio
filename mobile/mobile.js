@@ -9,7 +9,7 @@ import {
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-app-check.js";
 import { firebaseConfig, appCheckSiteKey } from "../firebase-config.js";
 import {
-  CONTRIBUTION_CATEGORY, monthMetrics, periodSpendingMetrics, positionMetrics, safeNumber, ymd
+  CONTRIBUTION_CATEGORY, cardDebtMetrics, monthMetrics, periodSpendingMetrics, positionMetrics, safeNumber, walletMetrics, ymd
 } from "../finance-logic.js";
 
 const $ = selector => document.querySelector(selector);
@@ -69,6 +69,9 @@ let user = null;
 let txCache = [];
 let positionsCache = [];
 let recurringCache = [];
+let walletsCache = [];
+let cardsCache = [];
+let scheduledCache = [];
 let parsed = null;
 let lastCreatedId = '';
 let installPrompt = null;
@@ -294,14 +297,27 @@ async function loadData() {
   loading = true;
   $('#syncBadge').textContent = 'Atualizando';
   try {
-    const [txSnap, posSnap, recSnap] = await Promise.all([
+    const [txSnap, posSnap, recSnap, walletSnap, cardSnap, scheduledSnap] = await Promise.all([
       getDocs(userCol('transactions')),
       getDocs(userCol('positions')),
-      getDocs(userCol('recurring'))
+      getDocs(userCol('recurring')),
+      getDocs(userCol('wallets')),
+      getDocs(userCol('cards')),
+      getDocs(userCol('scheduled'))
     ]);
     txCache = txSnap.docs.map(item => ({ id:item.id, ...item.data() }));
     positionsCache = posSnap.docs.map(item => ({ id:item.id, ...item.data() }));
     recurringCache = recSnap.docs.map(item => ({ id:item.id, ...item.data() }));
+    walletsCache = walletSnap.docs.map(item => ({ id:item.id, ...item.data() }));
+    cardsCache = cardSnap.docs.map(item => ({ id:item.id, ...item.data() }));
+    scheduledCache = scheduledSnap.docs.map(item => ({ id:item.id, ...item.data() }));
+    const walletSelect = $('#editWallet');
+    if (walletSelect) {
+      const previous = walletSelect.value || localStorage.getItem('mp:lastWallet') || '';
+      const active = walletsCache.filter(item => item.active !== false);
+      walletSelect.innerHTML = `<option value="">${active.length ? 'Selecione a carteira' : 'Cadastre uma carteira na Web'}</option>` + active.map(item => `<option value="${item.id}">${esc(item.institution)} · ${esc(item.name)}</option>`).join('');
+      walletSelect.value = active.some(item => item.id === previous) ? previous : active[0]?.id || '';
+    }
     renderDashboard();
     renderRecent();
     lastResumeSync = Date.now();
@@ -314,7 +330,7 @@ function renderDashboard() {
   const now = new Date(); now.setDate(1);
   const metrics = monthMetrics(txCache,now,recurringCache);
   const spending = periodSpendingMetrics(txCache,recurringCache,now);
-  const positions = positionMetrics(positionsCache,txCache,ymd(new Date()));
+  const positions = positionMetrics(positionsCache,txCache,ymd(new Date()),walletsCache,cardsCache,scheduledCache);
   $('#netWorth').textContent = currency.format(positions.netWorth);
   $('#netWorthDetail').textContent = `${currency.format(positions.assets)} em ativos − ${currency.format(positions.debts)} em dívidas`;
   $('#monthBalance').textContent = currency.format(metrics.balance);
@@ -344,7 +360,7 @@ function renderRecent() {
   $('#recentList').innerHTML = rows.length ? rows.map(tx => `
     <div class="recent-row">
       <div class="recent-icon">${tx.type === 'income' ? '+' : '−'}</div>
-      <div class="recent-main"><strong>${esc(tx.description || tx.category)}</strong><small>${esc(tx.category)} · ${formatDate(tx.date)}</small></div>
+      <div class="recent-main"><strong>${esc(tx.description || tx.category)}</strong><small>${esc(tx.category)} · ${formatDate(tx.date)}${walletsCache.find(w => w.id === tx.walletId) ? ` · ${esc(walletsCache.find(w => w.id === tx.walletId).name)}` : ''}</small></div>
       <div class="money ${tx.type}">${tx.type === 'income' ? '+' : '−'}${currency.format(safeNumber(tx.amount))}</div>
     </div>`).join('') : '<div class="empty">Nenhum lançamento.</div>';
 }
@@ -358,7 +374,10 @@ async function saveParsed() {
   saving = true;
   $('#saveSmartBtn').disabled = true;
   try {
-    const ref = await addDoc(userCol('transactions'), { ...data, recurring:false, createdAt:serverTimestamp() });
+    const walletId = $('#editWallet')?.value || null;
+    if (walletsCache.some(item => item.active !== false) && !walletId) { toast('Selecione a carteira.'); return; }
+    if (walletId) localStorage.setItem('mp:lastWallet', walletId);
+    const ref = await addDoc(userCol('transactions'), { ...data, walletId, cardId:null, recurring:false, createdAt:serverTimestamp() });
     lastCreatedId = ref.id;
     $('#undoBtn').classList.remove('hidden');
     $('#smartInput').value = '';
@@ -476,7 +495,7 @@ onAuthStateChanged(auth, async current => {
       setTimeout(() => $('#quickSection').scrollIntoView({block:'start'}),100);
     }
   } else {
-    txCache=[]; positionsCache=[]; recurringCache=[]; renderParsed(null);
+    txCache=[]; positionsCache=[]; recurringCache=[]; walletsCache=[]; cardsCache=[]; scheduledCache=[]; renderParsed(null);
   }
 });
 
