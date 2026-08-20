@@ -67,9 +67,9 @@ test('Timestamps críticos são controlados pelo PostgreSQL para sessões do PWA
 });
 
 test('Frontend usa somente URL e publishable key do Supabase', () => {
-  assert.match(supabaseConfig, /__SUPABASE_URL__/);
-  assert.match(supabaseConfig, /__SUPABASE_PUBLISHABLE_KEY__/);
-  assert.match(supabaseConfig, /sb_publishable_/);
+  assert.match(supabaseConfig, /https:\/\/[a-z0-9]+\.supabase\.co/);
+  assert.match(supabaseConfig, /sb_publishable_[A-Za-z0-9_-]+/);
+  assert.doesNotMatch(supabaseConfig, /__SUPABASE_(?:URL|PUBLISHABLE_KEY)__/);
   assert.match(supabaseClient, /createClient/);
   assert.match(supabaseClient, /sessionStorage/);
   assert.doesNotMatch(`${supabaseConfig}\n${supabaseClient}`, /service[_-]?role/i);
@@ -91,13 +91,13 @@ test('CRUD legado resolve somente para tabelas Supabase conhecidas', () => {
   assert.match(firestoreCompat, /Coleção não suportada/);
 });
 
-test('Exclusão de conta usa chave secreta somente na Edge Function autenticada', () => {
+test('Exclusão de conta usa chave secreta somente na Edge Function com validação explícita do usuário', () => {
   assert.match(authCompat, /functions\.invoke\('delete-account'/);
   assert.match(deleteAccount, /SUPABASE_SECRET_KEYS/);
   assert.match(deleteAccount, /secretKeys\.default/);
   assert.match(deleteAccount, /auth\.getUser\(token\)/);
   assert.match(deleteAccount, /auth\.admin\.deleteUser\(userData\.user\.id\)/);
-  assert.match(functionConfig, /\[functions\.delete-account\][\s\S]*verify_jwt\s*=\s*true/);
+  assert.match(functionConfig, /\[functions\.delete-account\][\s\S]*verify_jwt\s*=\s*false/);
   assert.doesNotMatch(authCompat, /SUPABASE_SECRET_KEYS|sb_secret_/);
 });
 
