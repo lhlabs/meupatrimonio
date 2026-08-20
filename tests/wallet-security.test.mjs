@@ -15,8 +15,20 @@ test('novas tabelas mantêm RLS forçado e isolamento por usuário', () => {
 });
 
 test('vínculos financeiros usam chaves compostas do mesmo usuário', () => {
-  assert.match(sql,/foreign key (user_id, "paymentWalletId") references public\.wallets(user_id, id)/i);
-  assert.match(sql,/transactions_wallet_fk foreign key (user_id, "walletId")/i);
-  assert.match(sql,/transactions_card_fk foreign key (user_id, "cardId")/i);
-  assert.match(sql,/scheduled_card_requires_wallet/i);
+  assert.match(sql,/foreign key \(user_id, "paymentWalletId"\) references public\.wallets\(user_id, id\)/i);
+  assert.match(sql,/transactions_wallet_fk foreign key \(user_id, "walletId"\) references public\.wallets\(user_id, id\)/i);
+  assert.match(sql,/transactions_card_fk foreign key \(user_id, "cardId"\) references public\.cards\(user_id, id\)/i);
+  assert.match(sql,/scheduled_wallet_fk foreign key \(user_id, "walletId"\) references public\.wallets\(user_id, id\)/i);
+  assert.match(sql,/scheduled_card_fk foreign key \(user_id, "cardId"\) references public\.cards\(user_id, id\)/i);
+});
+
+test('cartões e parcelamentos exigem rota de pagamento e metadados íntegros', () => {
+  for (const constraint of [
+    'transactions_card_requires_wallet', 'transactions_installment_metadata_valid',
+    'recurring_card_requires_wallet',
+    'scheduled_card_requires_wallet', 'scheduled_installment_metadata_valid'
+  ]) assert.ok(sql.includes(constraint), `constraint ausente: ${constraint}`);
+  assert.doesNotMatch(sql, /route_exclusive/);
+  assert.match(sql, /"installmentNumber" <= "installmentTotal"/);
+  assert.match(sql, /"purchaseDate" is not null/);
 });
