@@ -1,4 +1,4 @@
-const CACHE='meu-patrimonio-v43';
+const CACHE='meu-patrimonio-v44';
 const FILES=['./','./index.html','./styles.css','./styles.base.css','./app.js','./registration.js','./security-hardening.js','./privacy-controls.js','./dashboard-metrics.js','./finance-logic.js','./firebase-config.js','./supabase-config.js','./supabase-client.js','./compat/firebase-app.js','./compat/firebase-auth.js','./compat/firebase-firestore.js','./compat/firebase-app-check.js','./manifest.webmanifest','./icon.svg'];
 async function precache(){const cache=await caches.open(CACHE);await Promise.all(FILES.map(async path=>{const response=await fetch(path,{cache:'reload'});if(!response.ok)throw new Error(`Falha ao atualizar ${path}`);await cache.put(path,response);}));}
 self.addEventListener('install',event=>{self.skipWaiting();event.waitUntil(precache())});

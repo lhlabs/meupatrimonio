@@ -33,8 +33,8 @@
       <div class="brand"><span class="brand-mark">MP</span><div><small>APP PESSOAL</small><h1>Meu Patrimônio</h1></div></div>
       <p class="muted">Entre com a mesma conta da versão web. Seus dados continuam sincronizados com segurança.</p>
       <form id="loginForm" class="stack" autocomplete="on">
-        <label>E-mail<input id="email" type="email" autocomplete="username" required /></label>
-        <label>Senha<input id="password" type="password" autocomplete="current-password" required /></label>
+        <label>E-mail<input id="email" name="username" type="email" inputmode="email" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="next" required /></label>
+        <label>Senha<input id="password" name="password" type="password" autocomplete="current-password" enterkeyhint="go" required /></label>
         <button class="primary" type="submit">Entrar</button>
       </form>
       <button id="resetPasswordBtn" class="text-button" type="button">Esqueci minha senha</button>
