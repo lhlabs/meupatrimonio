@@ -60,8 +60,7 @@ function addOverviewStyles() {
       white-space:nowrap;
     }
 
-    .overview-status-pill,
-    .overview-score-pill {
+    .overview-status-pill {
       display:inline-flex;
       align-items:center;
       gap:6px;
@@ -289,11 +288,12 @@ function syncOverview() {
   if (status) {
     status.classList.toggle('positive', result > 0);
     status.classList.toggle('negative', result < 0);
-    status.textContent = result > 0
+    const message = result > 0
       ? '● Mês projetado no azul'
       : result < 0
         ? '● Atenção ao fechamento'
         : '● Mês projetado equilibrado';
+    if (status.textContent !== message) status.textContent = message;
   }
 }
 
