@@ -1,0 +1,90 @@
+name: Polish recurring card implementation
+
+on:
+  pull_request:
+    branches: [main]
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  polish:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Polish implementation
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app.js')
+          text = p.read_text()
+          old_filter = "for (const item of scheduledCache.filter(row => String(row.id || '').startsWith(prefix))) {"
+          new_filter = "for (const item of scheduledCache.filter(row => String(row.id || '').startsWith(prefix) && row.status === 'active')) {"
+          if text.count(old_filter) != 1:
+              raise SystemExit('pending recurring schedule filter not found')
+          text = text.replace(old_filter, new_filter, 1)
+          start_marker = "      if (recurring.cardId) {"
+          end_marker = "      cursor.setMonth(cursor.getMonth() + 1);\n\n    }"
+          process_start = text.index('async function processAutomations()')
+          start = text.index(start_marker, process_start)
+          end = text.index(end_marker, start) + len("      cursor.setMonth(cursor.getMonth() + 1);")
+          replacement = '''      if (recurring.cardId) {
+        const card = cardById(recurring.cardId);
+        const invoice = card && card.active !== false && recurring.type === 'expense'
+          ? cardInstallmentSchedule({ amount:safeNumber(recurring.amount), installments:1, purchaseDate:due, closingDay:card.closingDay, dueDay:card.dueDay })[0]
+          : null;
+        const scheduledId = recurringCardScheduleId(recurring.id, due);
+        const transactionId = scheduledId ? `sched_${scheduledId}` : '';
+        const alreadyPaid = !!transactionId && (existingIds.has(transactionId) || txCache.some(tx => tx.sourceType === 'scheduled' && tx.sourceId === scheduledId));
+        const existingSchedule = scheduledCache.find(item => item.id === scheduledId);
+        if (invoice && scheduledId && !alreadyPaid && !existingSchedule) {
+          const child = {
+            name:`${recurring.name || recurring.category} · fatura`, type:'expense', amount:invoice.amount,
+            category:recurring.category, description:recurring.name || recurring.description || '', dueDate:invoice.date,
+            frequency:'once', status:'active', walletId:card.paymentWalletId, cardId:card.id, purchaseDate:due,
+            installmentGroupId:null, installmentNumber:null, installmentTotal:null
+          };
+          await setDoc(userDoc('scheduled', scheduledId), { ...child, createdAt:serverTimestamp(), updatedAt:serverTimestamp() });
+          scheduledCache.push({ id:scheduledId, ...child });
+        }
+        cursor.setMonth(cursor.getMonth() + 1);
+        continue;
+      }
+      const id = `rec_${recurring.id}_${due.slice(0,7)}`;
+      if (!existingIds.has(id)) {
+        await setDoc(userDoc('transactions', id), {
+          type: recurring.type,
+          amount: safeNumber(recurring.amount),
+          category: recurring.category,
+          description: recurring.name || recurring.description || '',
+          date: due,
+          recurring: true,
+          sourceType: 'recurring',
+          sourceId: recurring.id,
+          walletId: recurring.walletId || null,
+          cardId: null,
+          createdAt: serverTimestamp()
+        });
+        existingIds.add(id);
+      }
+      cursor.setMonth(cursor.getMonth() + 1);'''
+          text = text[:start] + replacement + text[end:]
+          p.write_text(text)
+          PY
+      - name: Validate
+        run: |
+          git diff --check
+          node --check app.js
+          node --test tests/recurring-card-routing.test.mjs
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- app.js
+          git commit -m "Refina histórico de recorrências no cartão"
+          git push origin HEAD:${{ github.head_ref }}
