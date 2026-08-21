@@ -1,7 +1,7 @@
 name: Apply recurring card reconciliation
 
 on:
-  push:
+  pull_request:
     branches: [main]
 
 permissions:
@@ -98,7 +98,7 @@ jobs:
 
                 const patch = {};
                 if (tx.archived !== true) patch.archived = true;
-                if (tx.walletId != null) patch.walletId = null;
+                if (tx.walletId !== card.paymentWalletId) patch.walletId = card.paymentWalletId;
                 if (tx.cardId !== card.id) patch.cardId = card.id;
                 if (tx.purchaseDate !== plan.purchaseDate) patch.purchaseDate = plan.purchaseDate;
                 if (Object.keys(patch).length) await updateDoc(userDoc('transactions', tx.id), patch);
@@ -199,6 +199,7 @@ jobs:
           if (afterClose[0]?.date !== '2026-10-07') throw new Error(`after close invoice mismatch: ${afterClose[0]?.date}`);
           NODE
           grep -q "async function reconcileRecurringCardRoutes" app.js
+          grep -q "patch.walletId = card.paymentWalletId" app.js
           grep -q "if (isArchivedTransaction(tx)) continue;" app.js
           grep -q "meu-patrimonio-v48" sw.js
           git diff --check
