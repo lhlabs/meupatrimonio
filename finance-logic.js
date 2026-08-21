@@ -43,8 +43,20 @@ export function isWithdrawal(item) {
     && norm(item.category) === norm(WITHDRAWAL_CATEGORY);
 }
 
+// Compatibilidade das telas de extrato: projeções persistidas existem para alimentar
+// o modo comprometido, mas não devem aparecer como lançamentos já realizados.
 export function isArchivedTransaction(item) {
-  return item?.archived === true;
+  return item?.archived === true || isStoredScheduledProjection(item);
+}
+
+export function isProjectedTransaction(item) {
+  return item?.projected === true;
+}
+
+export function isStoredScheduledProjection(item) {
+  return isProjectedTransaction(item)
+    && item?.sourceType === 'scheduled'
+    && !item?.installmentGroupId;
 }
 
 export function isVariableConsumption(item) {
@@ -52,15 +64,19 @@ export function isVariableConsumption(item) {
   return !['recurring', 'scheduled'].includes(item.sourceType);
 }
 
-export function monthRows(transactions, date) {
+export function monthRows(transactions, date, { includeProjected = false } = {}) {
   const key = monthKey(date);
-  return transactions.filter(item => !isArchivedTransaction(item) && String(item?.date || '').startsWith(key));
+  return transactions.filter(item =>
+    (!isArchivedTransaction(item) || (includeProjected && isStoredScheduledProjection(item)))
+    && String(item?.date || '').startsWith(key)
+  );
 }
 
 export function contributionBalance(transactions, throughDate = null) {
+  const realized = transactions.filter(item => !isProjectedTransaction(item));
   const rows = throughDate
-    ? transactions.filter(item => String(item?.date || '') <= throughDate)
-    : transactions;
+    ? realized.filter(item => String(item?.date || '') <= throughDate)
+    : realized;
   const contributions = rows.filter(isContribution).reduce((sum, item) => sum + safeNumber(item.amount), 0);
   const withdrawals = rows.filter(isWithdrawal).reduce((sum, item) => sum + safeNumber(item.amount), 0);
   return Math.max(0, contributions - withdrawals);
@@ -115,7 +131,12 @@ export function cardInstallmentSchedule({ amount, installments, purchaseDate, cl
 export function walletMetrics(wallets = [], cards = [], transactions = [], throughDate = ymd(new Date())) {
   void cards;
   const byWallet = wallets.map(wallet => {
-    const movements = transactions.filter(item => !isArchivedTransaction(item) && item?.walletId === wallet.id && (!throughDate || String(item.date || '') <= throughDate));
+    const movements = transactions.filter(item =>
+      !isArchivedTransaction(item)
+      && !isProjectedTransaction(item)
+      && item?.walletId === wallet.id
+      && (!throughDate || String(item.date || '') <= throughDate)
+    );
     const movementBalance = movements.reduce((sum, item) => {
       const amount = safeNumber(item.amount);
       return sum + (item.type === 'income' ? amount : item.type === 'expense' ? -amount : 0);
@@ -256,13 +277,14 @@ export function projectedCardInstallmentRows(transactions = [], scheduled = [], 
 
 export function effectiveMonthRows(transactions = [], recurring = [], date, now = new Date()) {
   return [
-    ...monthRows(transactions, date),
+    ...monthRows(transactions, date, { includeProjected: true }),
     ...projectedRecurringRows(transactions, recurring, date, now)
   ];
 }
 
-export function monthMetrics(transactions, date, recurring = [], now = new Date()) {
-  const rows = recurring?.length
+export function monthMetrics(transactions, date, recurring = null, now = new Date()) {
+  const forecasting = Array.isArray(recurring);
+  const rows = forecasting
     ? effectiveMonthRows(transactions, recurring, date, now)
     : monthRows(transactions, date);
   const income = rows.filter(item => item.type === 'income' && !isWithdrawal(item)).reduce((sum, item) => sum + safeNumber(item.amount), 0);
