@@ -27,6 +27,33 @@ jobs:
               raise SystemExit('patch source not found')
           raw = source.split(marker, 1)[1].split("\n          PY", 1)[0]
           code = '\n'.join(line[10:] if line.startswith('          ') else line for line in raw.splitlines())
+          old_def = """def replace_once(old, new, label):
+    global text
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f'{label}: expected 1 match, found {count}')
+    text = text.replace(old, new, 1)
+"""
+          new_def = """def replace_once(old, new, label):
+    global text
+    count = text.count(old)
+    if count == 1:
+        text = text.replace(old, new, 1)
+        return
+    if label == 'automation materialization' and count == 0:
+        function_start = text.find('async function processAutomations()')
+        anchor = '      const id = `rec_${recurring.id}_${due.slice(0,7)}`;'
+        start = text.find(anchor, function_start)
+        marker = '      cursor.setMonth(cursor.getMonth() + 1);'
+        end = text.find(marker, start)
+        if function_start >= 0 and start >= 0 and end >= 0:
+            text = text[:start] + new + text[end + len(marker):]
+            return
+    raise SystemExit(f'{label}: expected 1 match, found {count}')
+"""
+          if old_def not in code:
+              raise SystemExit('replace_once definition not found')
+          code = code.replace(old_def, new_def, 1)
           exec(compile(code, 'recurring-card-patch', 'exec'))
           PY
       - name: Validate patch
