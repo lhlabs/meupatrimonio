@@ -27,30 +27,8 @@ jobs:
               raise SystemExit('patch source not found')
           raw = source.split(marker, 1)[1].split("\n          PY", 1)[0]
           code = '\n'.join(line[10:] if line.startswith('          ') else line for line in raw.splitlines())
-          old_def = """def replace_once(old, new, label):
-    global text
-    count = text.count(old)
-    if count != 1:
-        raise SystemExit(f'{label}: expected 1 match, found {count}')
-    text = text.replace(old, new, 1)
-"""
-          new_def = """def replace_once(old, new, label):
-    global text
-    count = text.count(old)
-    if count == 1:
-        text = text.replace(old, new, 1)
-        return
-    if label == 'automation materialization' and count == 0:
-        function_start = text.find('async function processAutomations()')
-        anchor = '      const id = `rec_${recurring.id}_${due.slice(0,7)}`;'
-        start = text.find(anchor, function_start)
-        marker = '      cursor.setMonth(cursor.getMonth() + 1);'
-        end = text.find(marker, start)
-        if function_start >= 0 and start >= 0 and end >= 0:
-            text = text[:start] + new + text[end + len(marker):]
-            return
-    raise SystemExit(f'{label}: expected 1 match, found {count}')
-"""
+          old_def = "def replace_once(old, new, label):\n    global text\n    count = text.count(old)\n    if count != 1:\n        raise SystemExit(f'{label}: expected 1 match, found {count}')\n    text = text.replace(old, new, 1)\n"
+          new_def = "def replace_once(old, new, label):\n    global text\n    count = text.count(old)\n    if count == 1:\n        text = text.replace(old, new, 1)\n        return\n    if label == 'automation materialization' and count == 0:\n        function_start = text.find('async function processAutomations()')\n        anchor = '      const id = `rec_${recurring.id}_${due.slice(0,7)}`;'\n        start = text.find(anchor, function_start)\n        end_marker = '      cursor.setMonth(cursor.getMonth() + 1);'\n        end = text.find(end_marker, start)\n        if function_start >= 0 and start >= 0 and end >= 0:\n            text = text[:start] + new + text[end + len(end_marker):]\n            return\n    raise SystemExit(f'{label}: expected 1 match, found {count}')\n"
           if old_def not in code:
               raise SystemExit('replace_once definition not found')
           code = code.replace(old_def, new_def, 1)
