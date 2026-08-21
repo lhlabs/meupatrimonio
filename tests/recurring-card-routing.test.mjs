@@ -20,6 +20,11 @@ test('previsão mensal não duplica recorrência do cartão', () => {
   assert.match(app, /!isRecurringCardSchedule\(item\)/);
 });
 
+test('editar ou excluir recorrência preserva histórico já realizado', () => {
+  assert.match(app, /startsWith\(prefix\) && row\.status === 'active'/);
+  assert.match(app, /Altere primeiro as recorrências vinculadas a este cartão/);
+});
+
 test('ciclo do cartão leva a compra recorrente para a fatura correta', () => {
   const [invoice] = cardInstallmentSchedule({
     amount: 99.90,
