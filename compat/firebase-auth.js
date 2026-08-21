@@ -243,6 +243,7 @@ export function onAuthStateChanged(_auth, callback) {
   let active = true;
   let delivered = false;
   let deliveredUid = undefined;
+  const initialRevision = authRevision;
 
   const deliver = user => {
     if (!active) return;
@@ -273,11 +274,13 @@ export function onAuthStateChanged(_auth, callback) {
   });
 
   supabase.auth.getSession().then(({ data, error }) => {
-    if (!active || error || delivered) return;
+    // Se a autenticação mudou enquanto o snapshot inicial estava em voo, ele
+    // não pode sobrescrever o estado mais novo recebido pelo listener.
+    if (!active || authRevision !== initialRevision || error || delivered) return;
     updateRawUser(data?.session?.user || null);
     deliver(rawUser);
   }).catch(() => {
-    if (!active || delivered) return;
+    if (!active || authRevision !== initialRevision || delivered) return;
     updateRawUser(null);
     deliver(null);
   });
