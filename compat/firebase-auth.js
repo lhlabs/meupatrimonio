@@ -1,4 +1,4 @@
-import { supabase } from '../supabase-client.js';
+import { supabase, ensureSupabaseSession } from '../supabase-client.js';
 
 export const browserLocalPersistence = 'local';
 export const browserSessionPersistence = 'session';
@@ -7,6 +7,7 @@ let rawUser = null;
 let lastSignup = { email: '', at: 0 };
 let recoveryHandled = false;
 let authRevision = 0;
+let passkeyEnrollmentRequested = false;
 const localAuthListeners = new Set();
 
 function appUrl() {
@@ -30,6 +31,8 @@ function mapUser(user) {
 function normalizeError(error) {
   if (!error) return null;
   const message = String(error.message || error).toLowerCase();
+  const rawCode = String(error.code || '').toLowerCase();
+  const name = String(error.name || '').toLowerCase();
   let code = 'auth/internal-error';
   if (message.includes('invalid login credentials')) code = 'auth/invalid-credential';
   else if (message.includes('email not confirmed')) code = 'auth/email-not-verified';
@@ -37,7 +40,11 @@ function normalizeError(error) {
   else if (message.includes('password') && (message.includes('weak') || message.includes('least'))) code = 'auth/weak-password';
   else if (message.includes('rate limit') || message.includes('too many')) code = 'auth/too-many-requests';
   else if (message.includes('invalid email') || (message.includes('email address') && message.includes('invalid'))) code = 'auth/invalid-email';
-  else if (message.includes('network') || message.includes('fetch')) code = 'auth/network-request-failed';
+  else if (message.includes('network') || message.includes('fetch') || message.includes('load failed')) code = 'auth/network-request-failed';
+  else if (rawCode === 'passkey_disabled') code = 'auth/passkey-disabled';
+  else if (rawCode === 'webauthn_credential_not_found') code = 'auth/passkey-not-found';
+  else if (rawCode.startsWith('webauthn_')) code = 'auth/passkey-failed';
+  else if (name === 'notallowederror') code = 'auth/passkey-cancelled';
   const wrapped = new Error(error.message || 'Falha de autenticação.');
   wrapped.code = code;
   wrapped.cause = error;
@@ -57,6 +64,93 @@ function notifyLocalAuth(user) {
   }, 0);
 }
 
+function showAuthMessage(message) {
+  if (typeof document === 'undefined') return;
+  const toast = document.getElementById('toast');
+  if (!toast) return;
+  toast.textContent = message;
+  toast.classList.add('show');
+  window.setTimeout(() => toast.classList.remove('show'), 3200);
+}
+
+function supportsPasskeys() {
+  return typeof window !== 'undefined'
+    && typeof window.PublicKeyCredential !== 'undefined'
+    && typeof supabase.auth.signInWithPasskey === 'function'
+    && typeof supabase.auth.registerPasskey === 'function';
+}
+
+function passkeyName(action = 'Entrar') {
+  const appleMobile = typeof navigator !== 'undefined' && /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  return appleMobile ? `${action} com Face ID` : `${action} com biometria`;
+}
+
+async function registerRequestedPasskey() {
+  if (!passkeyEnrollmentRequested || !supportsPasskeys()) return;
+  passkeyEnrollmentRequested = false;
+  try {
+    const { error } = await supabase.auth.registerPasskey();
+    if (error) throw normalizeError(error);
+    showAuthMessage('Face ID ativado. No próximo acesso, use a biometria.');
+  } catch (error) {
+    const normalized = error?.code ? error : normalizeError(error);
+    if (normalized.code === 'auth/passkey-disabled') {
+      showAuthMessage('Face ID precisa ser habilitado no Supabase antes do primeiro cadastro.');
+    } else if (normalized.code !== 'auth/passkey-cancelled') {
+      console.error('Falha ao cadastrar passkey.', normalized);
+      showAuthMessage('Não foi possível ativar o Face ID agora. O login por senha continua funcionando.');
+    }
+  }
+}
+
+async function signInWithPasskey() {
+  const { data, error } = await supabase.auth.signInWithPasskey();
+  if (error) throw normalizeError(error);
+  const signedInUser = data?.user || data?.session?.user || null;
+  updateRawUser(signedInUser);
+  await ensureSupabaseSession();
+  notifyLocalAuth(signedInUser);
+  return { user: mapUser(signedInUser) };
+}
+
+function installPasskeyLoginButton() {
+  if (!supportsPasskeys() || typeof document === 'undefined') return;
+  const form = document.getElementById('loginForm');
+  if (!form || document.getElementById('passkeyLoginBtn')) return;
+
+  const button = document.createElement('button');
+  button.id = 'passkeyLoginBtn';
+  button.type = 'button';
+  button.className = document.getElementById('resetPasswordBtn')?.className || 'link-button';
+  button.textContent = passkeyName('Entrar');
+  button.setAttribute('aria-label', passkeyName('Entrar'));
+
+  const resetButton = document.getElementById('resetPasswordBtn');
+  if (resetButton?.parentNode) resetButton.parentNode.insertBefore(button, resetButton);
+  else form.insertAdjacentElement('afterend', button);
+
+  button.addEventListener('click', async () => {
+    if (button.disabled) return;
+    button.disabled = true;
+    try {
+      await signInWithPasskey();
+    } catch (error) {
+      if (error.code === 'auth/passkey-disabled') {
+        showAuthMessage('Face ID ainda não está habilitado no servidor.');
+      } else if (error.code === 'auth/passkey-cancelled') {
+        // O usuário simplesmente fechou o seletor biométrico.
+      } else {
+        // Sem passkey neste dispositivo: o próximo login por senha cadastra uma.
+        passkeyEnrollmentRequested = true;
+        showAuthMessage('Entre com e-mail e senha uma vez para ativar o Face ID.');
+        document.getElementById('email')?.focus();
+      }
+    } finally {
+      button.disabled = false;
+    }
+  });
+}
+
 const authFacade = {
   get currentUser() { return mapUser(rawUser); },
   languageCode: 'pt-BR'
@@ -74,6 +168,7 @@ async function refreshCurrentUser() {
 }
 
 export function getAuth() {
+  installPasskeyLoginButton();
   return authFacade;
 }
 
@@ -87,6 +182,15 @@ export async function signInWithEmailAndPassword(_auth, email, password) {
   if (error) throw normalizeError(error);
   const signedInUser = data.user || data.session?.user || null;
   updateRawUser(signedInUser);
+
+  // Antes de liberar a UI, garante que a sessão que acabou de ser emitida já é
+  // a sessão corrente usada pelo cliente de dados. Isso fecha a janela em que
+  // uma das consultas paralelas podia sair com o token anterior e receber 401.
+  await ensureSupabaseSession();
+
+  // Quando o usuário tentou Face ID sem uma passkey cadastrada, o login por
+  // senha desta vez serve para cadastrar a credencial biométrica com segurança.
+  await registerRequestedPasskey();
 
   // Entrega o usuário diretamente após o login ter terminado. Assim a UI não
   // depende de um segundo evento do Supabase para sair da tela de acesso.
@@ -139,7 +243,6 @@ export function onAuthStateChanged(_auth, callback) {
   let active = true;
   let delivered = false;
   let deliveredUid = undefined;
-  const initialRevision = authRevision;
 
   const deliver = user => {
     if (!active) return;
@@ -155,19 +258,9 @@ export function onAuthStateChanged(_auth, callback) {
   // diretamente, sem depender do timing interno do onAuthStateChange.
   localAuthListeners.add(deliver);
 
-  supabase.auth.getSession().then(({ data }) => {
-    // O snapshot inicial é descartado se qualquer alteração de autenticação
-    // aconteceu enquanto a leitura estava em andamento.
-    if (!active || authRevision !== initialRevision) return;
-    updateRawUser(data?.session?.user || null);
-    deliver(rawUser);
-  }).catch(() => {
-    if (!active || authRevision !== initialRevision) return;
-    updateRawUser(null);
-    deliver(null);
-  });
-
-  const { data } = supabase.auth.onAuthStateChange((event, session) => {
+  // Assina os eventos antes de ler o snapshot inicial. Assim nenhum login,
+  // logout ou restauração de sessão que aconteça durante o bootstrap é perdido.
+  const { data: subscriptionData } = supabase.auth.onAuthStateChange((event, session) => {
     const eventUser = session?.user || null;
     updateRawUser(eventUser);
 
@@ -179,10 +272,20 @@ export function onAuthStateChanged(_auth, callback) {
     }
   });
 
+  supabase.auth.getSession().then(({ data, error }) => {
+    if (!active || error || delivered) return;
+    updateRawUser(data?.session?.user || null);
+    deliver(rawUser);
+  }).catch(() => {
+    if (!active || delivered) return;
+    updateRawUser(null);
+    deliver(null);
+  });
+
   return () => {
     active = false;
     localAuthListeners.delete(deliver);
-    data?.subscription?.unsubscribe?.();
+    subscriptionData?.subscription?.unsubscribe?.();
   };
 }
 
@@ -199,6 +302,7 @@ export async function reauthenticateWithCredential(_currentUser, credential) {
   });
   if (error) throw normalizeError(error);
   updateRawUser(data.user || null);
+  await ensureSupabaseSession();
   return { user: mapUser(rawUser) };
 }
 
@@ -249,4 +353,4 @@ async function handlePasswordRecovery() {
   window.location.replace(clean.toString());
 }
 
-refreshCurrentUser().catch(() => {});
+installPasskeyLoginButton();
