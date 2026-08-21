@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import {
   CONTRIBUTION_CATEGORY,
   contributionBalance,
+  isArchivedTransaction,
   monthMetrics,
   periodSpendingMetrics,
   walletMetrics
@@ -39,6 +40,11 @@ test('painel mensal inclui compromissos projetados sem convertê-los em realizad
   const spending = periodSpendingMetrics(transactions, [], august);
   assert.equal(spending.totalExpenses, 400);
   assert.equal(spending.otherExpenses, 400);
+});
+
+test('projeções persistidas ficam fora do extrato bruto e exportações de realizado', () => {
+  assert.equal(isArchivedTransaction(transactions.find(item => item.id === 'scheduled')), true);
+  assert.equal(isArchivedTransaction(transactions.find(item => item.id === 'expense')), false);
 });
 
 test('projeções não alteram saldo real de carteira nem patrimônio por aportes', () => {
