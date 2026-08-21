@@ -34,11 +34,13 @@ test('card open balance includes every unpaid installment of an incurred purchas
 });
 
 test('paying one installment restores only that installment of available limit', () => {
-  const remaining = scheduled.map(item => item.id === 'inst_1' ? { ...item, status:'posted' } : item);
-  const visa = cardDebtMetrics(cards, [], remaining, '2026-09-08').byCard[0];
+  const installmentOnly = scheduled
+    .filter(item => item.id !== 'recurring_card')
+    .map(item => item.id === 'inst_1' ? { ...item, status:'posted' } : item);
+  const visa = cardDebtMetrics(cards, [], installmentOnly, '2026-09-08').byCard[0];
 
-  assert.equal(visa.open, 250);
-  assert.equal(visa.availableLimit, 2750);
-  assert.equal(visa.nextDue, '2026-09-07');
-  assert.equal(visa.nextInvoice, 50);
+  assert.equal(visa.open, 200);
+  assert.equal(visa.availableLimit, 2800);
+  assert.equal(visa.nextDue, '2026-10-07');
+  assert.equal(visa.nextInvoice, 100);
 });
