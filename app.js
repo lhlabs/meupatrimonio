@@ -145,7 +145,7 @@ function metricsForMonth(date) { return monthMetrics(transactionsWithCardPlans(d
 function spendingForMonth(date) { return periodSpendingMetrics(transactionsWithCardPlans(date), forecastRecurringRules(), date); }
 async function removeRecurringCardSchedules(recurringId) {
   const prefix = `rec_card_${recurringId}_`;
-  for (const item of scheduledCache.filter(row => String(row.id || '').startsWith(prefix))) {
+  for (const item of scheduledCache.filter(row => String(row.id || '').startsWith(prefix) && row.status === 'active')) {
     await deleteDoc(userDoc('scheduled', item.id));
   }
 }
