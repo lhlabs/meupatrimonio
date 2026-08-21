@@ -43,8 +43,10 @@ export function isWithdrawal(item) {
     && norm(item.category) === norm(WITHDRAWAL_CATEGORY);
 }
 
+// Compatibilidade das telas de extrato: projeções persistidas existem para alimentar
+// o modo comprometido, mas não devem aparecer como lançamentos já realizados.
 export function isArchivedTransaction(item) {
-  return item?.archived === true;
+  return item?.archived === true || isStoredScheduledProjection(item);
 }
 
 export function isProjectedTransaction(item) {
@@ -65,8 +67,7 @@ export function isVariableConsumption(item) {
 export function monthRows(transactions, date, { includeProjected = false } = {}) {
   const key = monthKey(date);
   return transactions.filter(item =>
-    !isArchivedTransaction(item)
-    && (includeProjected || !isStoredScheduledProjection(item))
+    (!isArchivedTransaction(item) || (includeProjected && isStoredScheduledProjection(item)))
     && String(item?.date || '').startsWith(key)
   );
 }
