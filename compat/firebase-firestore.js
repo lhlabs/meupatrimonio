@@ -1,6 +1,12 @@
-import { supabase } from '../supabase-client.js';
+import {
+  supabase,
+  ensureSupabaseSession,
+  refreshSupabaseSession,
+  isRecoverableAuthError
+} from '../supabase-client.js';
 
 const SERVER_TIMESTAMP = Symbol('serverTimestamp');
+const READ_RETRY_DELAY_MS = 90;
 
 class CompatTimestamp {
   constructor(value) {
@@ -84,6 +90,41 @@ function generatedId() {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
 }
 
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isRecoverableReadError(error) {
+  const message = String(error?.message || error || '').toLowerCase();
+  return isRecoverableAuthError(error)
+    || message.includes('failed to fetch')
+    || message.includes('networkerror')
+    || message.includes('load failed');
+}
+
+async function runRead(operation) {
+  // Aguarda a restauração/renovação da sessão antes do primeiro lote de dados.
+  // Isso evita consultas saírem com o token anterior enquanto o Supabase gira
+  // o refresh token ao abrir ou retomar o PWA.
+  await ensureSupabaseSession();
+
+  let result = await operation();
+  if (!result?.error || !isRecoverableReadError(result.error)) return result;
+
+  // Uma 401 isolada pode acontecer enquanto outra chamada termina a rotação da
+  // sessão. Recria a consulta e tenta novamente com o estado atual do cliente.
+  await delay(READ_RETRY_DELAY_MS);
+  await ensureSupabaseSession();
+  result = await operation();
+  if (!result?.error || !isRecoverableAuthError(result.error)) return result;
+
+  // Se ainda for 401/JWT, renova a sessão uma única vez. refreshSupabaseSession
+  // é single-flight, então várias leituras simultâneas não giram o token juntas.
+  const session = await refreshSupabaseSession();
+  if (!session) return result;
+  return operation();
+}
+
 async function requireSingleMutation(query, ref, operation) {
   const key = ref.singleton ? 'user_id' : 'id';
   const { data, error } = await query.select(key);
@@ -110,10 +151,10 @@ export function serverTimestamp() {
 }
 
 export async function getDocs(ref) {
-  const { data, error } = await supabase
+  const { data, error } = await runRead(() => supabase
     .from(ref.table)
     .select('*')
-    .eq('user_id', ref.userId);
+    .eq('user_id', ref.userId));
   if (error) throw error;
   return {
     docs: (data || []).map(row => snapshot(row.id, row))
@@ -131,9 +172,11 @@ export async function getDoc(ref) {
     } : null);
   }
 
-  let query = supabase.from(ref.table).select('*').eq('user_id', ref.userId);
-  if (!ref.singleton) query = query.eq('id', ref.id);
-  const { data, error } = await query.maybeSingle();
+  const { data, error } = await runRead(() => {
+    let query = supabase.from(ref.table).select('*').eq('user_id', ref.userId);
+    if (!ref.singleton) query = query.eq('id', ref.id);
+    return query.maybeSingle();
+  });
   if (error) throw error;
   return snapshot(ref.id || ref.userId, data);
 }
