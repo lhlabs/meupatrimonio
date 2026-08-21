@@ -51,6 +51,12 @@ export function isProjectedTransaction(item) {
   return item?.projected === true;
 }
 
+export function isStoredScheduledProjection(item) {
+  return isProjectedTransaction(item)
+    && item?.sourceType === 'scheduled'
+    && !item?.installmentGroupId;
+}
+
 export function isVariableConsumption(item) {
   if (!item || item.type !== 'expense' || isContribution(item)) return false;
   return !['recurring', 'scheduled'].includes(item.sourceType);
@@ -60,7 +66,7 @@ export function monthRows(transactions, date, { includeProjected = false } = {})
   const key = monthKey(date);
   return transactions.filter(item =>
     !isArchivedTransaction(item)
-    && (includeProjected || !isProjectedTransaction(item))
+    && (includeProjected || !isStoredScheduledProjection(item))
     && String(item?.date || '').startsWith(key)
   );
 }
