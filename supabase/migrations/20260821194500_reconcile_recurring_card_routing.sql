@@ -14,6 +14,7 @@ declare
   tx record;
   card record;
   purchase_date date;
+  closing_date date;
   due_month date;
   invoice_due date;
   month_last_day integer;
@@ -130,8 +131,21 @@ begin
       continue;
     end if;
 
-    due_month := date_trunc('month', purchase_date)::date
-      + make_interval(months => case when extract(day from purchase_date)::integer <= card."closingDay" then 1 else 2 end);
+    month_last_day := extract(day from (date_trunc('month', purchase_date) + interval '1 month - 1 day'))::integer;
+    closing_date := make_date(
+      extract(year from purchase_date)::integer,
+      extract(month from purchase_date)::integer,
+      least(card."closingDay", month_last_day)
+    );
+
+    due_month := date_trunc('month', purchase_date)::date;
+    if purchase_date >= closing_date then
+      due_month := (due_month + interval '1 month')::date;
+    end if;
+    if card."dueDay" <= card."closingDay" then
+      due_month := (due_month + interval '1 month')::date;
+    end if;
+
     month_last_day := extract(day from (date_trunc('month', due_month) + interval '1 month - 1 day'))::integer;
     invoice_due := make_date(
       extract(year from due_month)::integer,
@@ -210,7 +224,7 @@ end;
 $$;
 
 comment on function public.sync_recurring_card_routing() is
-  'Reconciles already materialized recurring expenses when their payment route is changed to or from a credit card, preserving unpaid card obligations and preventing double counting.';
+  'Reconciles already materialized recurring expenses when their payment route is changed to or from a credit card, using the same closing/due-date semantics as cardInstallmentSchedule and preserving unpaid obligations without double counting.';
 
 drop trigger if exists recurring_card_routing_sync on public.recurring;
 create trigger recurring_card_routing_sync
