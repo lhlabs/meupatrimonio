@@ -96,10 +96,64 @@ function calcPositions() { return positionMetrics(positionsCache, txCache, ymd(n
 function walletById(id) { return walletsCache.find(item => item.id === id) || null; }
 function cardById(id) { return cardsCache.find(item => item.id === id) || null; }
 function newEntityId(prefix = 'id') { return `${prefix}_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`.replace(/[^A-Za-z0-9_-]/g, '_'); }
-function installmentPlansForMonth(date) { return plannedForMonth(date).filter(item => item.installmentGroupId); }
-function transactionsWithInstallmentPlans(date) { return [...txCache, ...installmentPlansForMonth(date)]; }
-function metricsForMonth(date) { return monthMetrics(transactionsWithInstallmentPlans(date), date, recurringCache); }
-function spendingForMonth(date) { return periodSpendingMetrics(transactionsWithInstallmentPlans(date), recurringCache, date); }
+function recurringCardScheduleId(recurringId, purchaseDate) {
+  const purchaseMonth = String(purchaseDate || '').slice(0, 7).replace('-', '');
+  return recurringId && /^\d{6}$/.test(purchaseMonth) ? `rec_card_${recurringId}_${purchaseMonth}` : '';
+}
+function isRecurringCardSchedule(item) { return String(item?.id || '').startsWith('rec_card_'); }
+function recurringCardPlanForPurchase(recurring, purchaseMonthDate) {
+  if (!recurring?.active || recurring.type !== 'expense' || !recurring.cardId) return null;
+  const card = cardById(recurring.cardId);
+  if (!card || card.active === false) return null;
+  const purchaseDate = recurringDue(recurring, purchaseMonthDate);
+  if (!purchaseDate) return null;
+  const invoice = cardInstallmentSchedule({ amount:safeNumber(recurring.amount), installments:1, purchaseDate, closingDay:card.closingDay, dueDay:card.dueDay })[0];
+  if (!invoice) return null;
+  const scheduledId = recurringCardScheduleId(recurring.id, purchaseDate);
+  return {
+    id:`planned_${scheduledId}`, scheduledId, name:recurring.name, description:recurring.description || recurring.name,
+    amount:invoice.amount, type:'expense', date:invoice.date, category:recurring.category, icon:'💳',
+    sourceType:'recurring', sourceId:recurring.id, walletId:card.paymentWalletId, cardId:card.id,
+    purchaseDate, projected:true
+  };
+}
+function recurringCardPlansForMonth(date) {
+  const key = monthKey(date), out = [];
+  recurringCache.filter(item => item.active && item.cardId && item.type === 'expense').forEach(recurring => {
+    for (let offset = -2; offset <= 0; offset += 1) {
+      const purchaseMonth = new Date(date.getFullYear(), date.getMonth() + offset, 1);
+      const plan = recurringCardPlanForPurchase(recurring, purchaseMonth);
+      if (!plan || !String(plan.date).startsWith(key)) continue;
+      const persisted = scheduledCache.some(item => item.id === plan.scheduledId)
+        || txCache.some(tx => tx.sourceType === 'scheduled' && tx.sourceId === plan.scheduledId);
+      if (!persisted) out.push(plan);
+    }
+  });
+  return out;
+}
+function cardPlansForMonth(date) {
+  const key = monthKey(date);
+  return plannedForMonth(date).filter(item => {
+    if (!item.cardId) return false;
+    if (item.sourceType !== 'scheduled') return true;
+    return !txCache.some(tx => tx.projected === true && tx.sourceType === 'scheduled' && tx.sourceId === item.sourceId && String(tx.date || '').startsWith(key));
+  });
+}
+function transactionsWithCardPlans(date) { return [...txCache, ...cardPlansForMonth(date)]; }
+function forecastRecurringRules() { return recurringCache.filter(item => !item.cardId); }
+function metricsForMonth(date) { return monthMetrics(transactionsWithCardPlans(date), date, forecastRecurringRules()); }
+function spendingForMonth(date) { return periodSpendingMetrics(transactionsWithCardPlans(date), forecastRecurringRules(), date); }
+async function removeRecurringCardSchedules(recurringId) {
+  const prefix = `rec_card_${recurringId}_`;
+  for (const item of scheduledCache.filter(row => String(row.id || '').startsWith(prefix) && row.status === 'active')) {
+    await deleteDoc(userDoc('scheduled', item.id));
+  }
+}
+function recurringRouteStart(dayOfMonth) {
+  const today = new Date();
+  const month = new Date(today.getFullYear(), today.getMonth() + (safeNumber(dayOfMonth) < today.getDate() ? 1 : 0), 1);
+  return recurringDue({ active:true, dayOfMonth, startDate:'', endDate:'' }, month) || ymd(today);
+}
 function timestampValue(value) { return value?.toMillis?.() ?? 0; }
 function dateFromMonthKey(key) {
   const [year, month] = String(key || '').split('-').map(Number);
@@ -228,13 +282,15 @@ function refreshAccountSelects() {
     select.innerHTML = accountOptions(walletsCache, current, walletsCache.some(item => item.active !== false) ? 'Selecione a carteira' : 'Cadastre uma carteira primeiro');
     if (walletsCache.some(item => item.id === current)) select.value = current;
   });
-  const cardSelect = $('#transactionCardId');
-  if (cardSelect) {
-    const current = cardSelect.value;
-    cardSelect.innerHTML = accountOptions(cardsCache, current, cardsCache.some(item => item.active !== false) ? 'Selecione o cartão' : 'Cadastre um cartão primeiro');
-    if (cardsCache.some(item => item.id === current)) cardSelect.value = current;
-  }
+  ['transactionCardId','recurringCardId'].forEach(id => {
+    const select = $('#'+id);
+    if (!select) return;
+    const current = select.value;
+    select.innerHTML = accountOptions(cardsCache, current, cardsCache.some(item => item.active !== false) ? 'Selecione o cartão' : 'Cadastre um cartão primeiro');
+    if (cardsCache.some(item => item.id === current)) select.value = current;
+  });
   syncTransactionRouting();
+  syncRecurringRouting();
 }
 
 function installAccountUi() {
@@ -340,6 +396,12 @@ async function submitCard(event) {
         await updateDoc(userDoc('scheduled', scheduled.id), { walletId:paymentWalletId, updatedAt:serverTimestamp() });
       }
     }
+    if (id) {
+      for (const recurring of recurringCache.filter(item => item.cardId === id)) {
+        await removeRecurringCardSchedules(recurring.id);
+        if (recurring.walletId !== paymentWalletId) await updateDoc(userDoc('recurring', recurring.id), { walletId:paymentWalletId, updatedAt:serverTimestamp() });
+      }
+    }
     $('#cardDialog').close();
     await loadAll();
   }, 'Cartão salvo');
@@ -399,8 +461,13 @@ function installTransactionRoutingUi() {
   const recurringForm = $('#recurringForm');
   const recurringButton = recurringForm?.querySelector('button[type="submit"]');
   if (recurringButton) {
-    const label = document.createElement('label'); label.innerHTML = 'Carteira<select id="recurringWalletId"></select>';
-    recurringForm.insertBefore(label, recurringButton);
+    const box = document.createElement('div');
+    box.id = 'recurringRouting';
+    box.className = 'routing-box';
+    box.innerHTML = `<label>Forma de pagamento<select id="recurringRoute"><option value="wallet">Carteira / conta</option><option value="card">Cartão de crédito</option><option value="none">Sem vínculo (legado)</option></select></label><label id="recurringWalletLabel">Carteira<select id="recurringWalletId"></select></label><label id="recurringCardLabel" class="hidden">Cartão<select id="recurringCardId"></select></label><small id="recurringRouteHint" class="muted routing-hint"></small>`;
+    recurringForm.insertBefore(box, recurringButton);
+    $('#recurringRoute').addEventListener('change', syncRecurringRouting);
+    $('#recurringCardId').addEventListener('change', syncRecurringRouting);
   }
   const scheduledForm = $('#scheduledForm');
   const scheduledButton = scheduledForm?.querySelector('button[type="submit"]');
@@ -452,6 +519,29 @@ function syncTransactionRouting() {
   const hint = $('#transactionRouteHint');
   if (hint) hint.textContent = cardMode ? 'O valor informado é o total da compra. Escolha o mês da primeira fatura; as parcelas seguintes avançam mês a mês e a carteira pagadora só é movimentada no vencimento.' : route === 'wallet' ? 'Esta movimentação altera o saldo da carteira escolhida.' : 'Lançamentos sem carteira ficam fora dos saldos por instituição.';
   if (cardMode) syncFirstInvoiceMonth();
+}
+
+function syncRecurringRouting() {
+  if (!$('#recurringRoute')) return;
+  const type = $('#recurringType')?.value || 'expense';
+  let route = $('#recurringRoute').value;
+  if (type === 'income' && route === 'card') {
+    route = walletsCache.some(item => item.active !== false) ? 'wallet' : 'none';
+    $('#recurringRoute').value = route;
+  }
+  const cardMode = route === 'card' && type === 'expense';
+  $('#recurringWalletLabel')?.classList.toggle('hidden', route !== 'wallet');
+  $('#recurringCardLabel')?.classList.toggle('hidden', !cardMode);
+  const card = cardMode ? cardById($('#recurringCardId')?.value) : null;
+  if (card && $('#recurringWalletId')) $('#recurringWalletId').value = card.paymentWalletId || '';
+  const hint = $('#recurringRouteHint');
+  if (hint) {
+    hint.textContent = cardMode
+      ? `A cobrança entra na fatura do ${card?.name || 'cartão'} conforme fechamento/vencimento. A carteira pagadora só é reduzida quando a fatura vence.`
+      : route === 'wallet'
+        ? 'A recorrência movimenta diretamente a carteira escolhida no dia cadastrado.'
+        : 'Sem vínculo não altera saldo por instituição; use apenas para compatibilidade com dados antigos.';
+  }
 }
 
 function installDebtFieldsUi() {
@@ -800,24 +890,47 @@ async function processAutomations() {
         cursor.setMonth(cursor.getMonth() + 1);
         continue;
       }
+      if (recurring.cardId) {
+        const card = cardById(recurring.cardId);
+        const invoice = card && card.active !== false && recurring.type === 'expense'
+? cardInstallmentSchedule({ amount:safeNumber(recurring.amount), installments:1, purchaseDate:due, closingDay:card.closingDay, dueDay:card.dueDay })[0]
+: null;
+        const scheduledId = recurringCardScheduleId(recurring.id, due);
+        const transactionId = scheduledId ? `sched_${scheduledId}` : '';
+        const alreadyPaid = !!transactionId && (existingIds.has(transactionId) || txCache.some(tx => tx.sourceType === 'scheduled' && tx.sourceId === scheduledId));
+        const existingSchedule = scheduledCache.find(item => item.id === scheduledId);
+        if (invoice && scheduledId && !alreadyPaid && !existingSchedule) {
+const child = {
+  name:`${recurring.name || recurring.category} · fatura`, type:'expense', amount:invoice.amount,
+  category:recurring.category, description:recurring.name || recurring.description || '', dueDate:invoice.date,
+  frequency:'once', status:'active', walletId:card.paymentWalletId, cardId:card.id, purchaseDate:due,
+  installmentGroupId:null, installmentNumber:null, installmentTotal:null
+};
+await setDoc(userDoc('scheduled', scheduledId), { ...child, createdAt:serverTimestamp(), updatedAt:serverTimestamp() });
+scheduledCache.push({ id:scheduledId, ...child });
+        }
+        cursor.setMonth(cursor.getMonth() + 1);
+        continue;
+      }
       const id = `rec_${recurring.id}_${due.slice(0,7)}`;
       if (!existingIds.has(id)) {
         await setDoc(userDoc('transactions', id), {
-          type: recurring.type,
-          amount: safeNumber(recurring.amount),
-          category: recurring.category,
-          description: recurring.name || recurring.description || '',
-          date: due,
-          recurring: true,
-          sourceType: 'recurring',
-          sourceId: recurring.id,
-          walletId: recurring.walletId || null,
-          cardId: null,
-          createdAt: serverTimestamp()
+type: recurring.type,
+amount: safeNumber(recurring.amount),
+category: recurring.category,
+description: recurring.name || recurring.description || '',
+date: due,
+recurring: true,
+sourceType: 'recurring',
+sourceId: recurring.id,
+walletId: recurring.walletId || null,
+cardId: null,
+createdAt: serverTimestamp()
         });
         existingIds.add(id);
       }
       cursor.setMonth(cursor.getMonth() + 1);
+
     }
   }
 
@@ -1168,12 +1281,13 @@ function renderMissions(metrics, goal, spending, spendingGoal, reserve) {
 
 function plannedForMonth(date) {
   const key = monthKey(date), out = [];
-  recurringCache.forEach(recurring => {
+  recurringCache.filter(recurring => !recurring.cardId).forEach(recurring => {
     const due = recurringDue(recurring, date);
     if (!due) return;
     const exists = txCache.some(tx => tx.sourceType === 'recurring' && tx.sourceId === recurring.id && String(tx.date || '').startsWith(key));
     if (!exists) out.push({ name: recurring.name, amount: safeNumber(recurring.amount), type: recurring.type, date: due, category: recurring.category, icon:'🔁', sourceType:'recurring', sourceId:recurring.id });
   });
+  out.push(...recurringCardPlansForMonth(date));
   scheduledCache.filter(item => item.status === 'active').forEach(scheduled => {
     let due = scheduled.dueDate;
     if (!due) return;
@@ -1214,9 +1328,9 @@ function renderUpcoming() {
       let guard = 0;
       while (due && due < today && guard++ < 50) due = addYear(due);
     }
-    if (due && due >= today && due <= end) rows.push({ date: due, name: item.name, amount: item.amount, icon:item.installmentGroupId ? '💳' : '📅' });
+    if (due && due >= today && due <= end) rows.push({ date: due, name: item.name, amount: item.amount, icon:item.cardId ? '💳' : item.installmentGroupId ? '💳' : '📅' });
   });
-  recurringCache.filter(item => item.active).forEach(item => {
+  recurringCache.filter(item => item.active && !item.cardId).forEach(item => {
     const due = nextRecurringDue(item, now);
     if (due && due <= end) rows.push({ date: due, name: item.name, amount: item.amount, icon:'🔁' });
   });
@@ -1263,11 +1377,18 @@ function renderAgenda() {
     return;
   }
   $('#automationNotice').classList.add('hidden');
-  const regularScheduled = scheduledCache.filter(item => !item.installmentGroupId);
+  const regularScheduled = scheduledCache.filter(item => !item.installmentGroupId && !isRecurringCardSchedule(item));
   const installmentGroups = new Set(scheduledCache.filter(item => item.status === 'active' && item.installmentGroupId).map(item => item.installmentGroupId));
   $('#recurringCount').textContent = `${recurringCache.filter(item => item.active).length} ativas`;
   $('#scheduledCount').textContent = `${regularScheduled.filter(item => item.status === 'active').length} futuras${installmentGroups.size ? ` · ${installmentGroups.size} parceladas` : ''}`;
-  $('#recurringList').innerHTML = recurringCache.map(item => `<div class="agenda-item ${item.active ? '' : 'inactive'}"><div class="agenda-icon">🔁</div><div><strong>${esc(item.name)}</strong><small>${currency.format(safeNumber(item.amount))} · dia ${item.dayOfMonth} · ${esc(item.category)}${walletById(item.walletId) ? ` · ${esc(walletById(item.walletId).name)}` : ''}</small></div><div class="agenda-actions"><button class="mini-btn" data-edit-rec="${item.id}">Editar</button><button class="mini-btn danger" data-del-rec="${item.id}">Excluir</button></div></div>`).join('') || '<div class="empty-state">Nenhuma recorrência.</div>';
+  $('#recurringList').innerHTML = recurringCache.map(item => {
+    const card = item.cardId ? cardById(item.cardId) : null;
+    const wallet = walletById(item.walletId);
+    const payment = card
+      ? ` · 💳 ${esc(card.name)}${wallet ? ` → ${esc(wallet.name)}` : ''}`
+      : wallet ? ` · 🏦 ${esc(wallet.name)}` : '';
+    return `<div class="agenda-item ${item.active ? '' : 'inactive'}"><div class="agenda-icon">${card ? '💳' : '🔁'}</div><div><strong>${esc(item.name)}</strong><small>${currency.format(safeNumber(item.amount))} · dia ${item.dayOfMonth} · ${esc(item.category)}${payment}</small></div><div class="agenda-actions"><button class="mini-btn" data-edit-rec="${item.id}">Editar</button><button class="mini-btn danger" data-del-rec="${item.id}">Excluir</button></div></div>`;
+  }).join('') || '<div class="empty-state">Nenhuma recorrência.</div>';
   $('#scheduledList').innerHTML = regularScheduled.map(item => {
     const postedTx = item.status === 'posted' ? latestScheduledTransaction(item.id) : null;
     const editAction = item.status === 'active' ? `<button class="mini-btn" data-edit-sch="${item.id}">Editar</button>` : postedTx ? `<button class="mini-btn" data-edit-tx="${postedTx.id}">Editar lançamento</button>` : '';
@@ -1477,7 +1598,18 @@ function openRecurring(item = null) {
   $('#recurringStart').value = item?.startDate || ymd(new Date());
   $('#recurringEnd').value = item?.endDate || '';
   $('#recurringActive').checked = item ? !!item.active : true;
-  if ($('#recurringWalletId')) $('#recurringWalletId').value = item?.walletId || walletsCache.find(row => row.active !== false)?.id || '';
+  const defaultWallet = item?.walletId || walletsCache.find(row => row.active !== false)?.id || '';
+  if ($('#recurringWalletId')) {
+    $('#recurringWalletId').innerHTML = accountOptions(walletsCache, defaultWallet, 'Selecione a carteira');
+    $('#recurringWalletId').value = defaultWallet;
+  }
+  if ($('#recurringCardId')) {
+    const defaultCard = item?.cardId || cardsCache.find(row => row.active !== false)?.id || '';
+    $('#recurringCardId').innerHTML = accountOptions(cardsCache, defaultCard, 'Selecione o cartão');
+    $('#recurringCardId').value = defaultCard;
+  }
+  if ($('#recurringRoute')) $('#recurringRoute').value = item?.cardId ? 'card' : item?.walletId ? 'wallet' : walletsCache.some(row => row.active !== false) ? 'wallet' : 'none';
+  syncRecurringRouting();
   $('#recurringDialog').showModal();
 }
 
@@ -1532,7 +1664,7 @@ document.addEventListener('change', event => {
   if (event.target.matches?.('#txDateFrom, #txDateTo')) renderTransactions();
 });
 $$('[data-tx-type]').forEach(button => button.addEventListener('click', () => setTxType(button.dataset.txType)));
-$('#recurringType').addEventListener('change', () => fillCategories($('#recurringCategory'), $('#recurringType').value));
+$('#recurringType').addEventListener('change', () => { fillCategories($('#recurringCategory'), $('#recurringType').value); syncRecurringRouting(); });
 $('#scheduledType').addEventListener('change', () => fillCategories($('#scheduledCategory'), $('#scheduledType').value));
 
 $('#transactionForm').addEventListener('submit', async event => {
@@ -1641,15 +1773,37 @@ $('#recurringForm').addEventListener('submit', async event => {
     const amount = safeNumber($('#recurringAmount').value);
     const category = $('#recurringCategory').value;
     const dayOfMonth = safeNumber($('#recurringDay').value);
-    const startDate = $('#recurringStart').value;
+    let startDate = $('#recurringStart').value;
     const endDate = $('#recurringEnd').value || '';
     const active = $('#recurringActive').checked;
     if (!name || !(amount > 0) || !['income','expense'].includes(type) || dayOfMonth < 1 || dayOfMonth > 31 || !startDate || (endDate && endDate < startDate)) throw new Error('Recorrência inválida');
-    const walletId = $('#recurringWalletId')?.value || null;
-    if (walletsCache.some(item => item.active !== false) && !walletId) throw new Error('Selecione a carteira da recorrência');
-    const data = { name, type, amount, category, description: name, dayOfMonth, startDate, endDate, active, walletId, cardId:null, updatedAt: serverTimestamp() };
-    if (id) await updateDoc(userDoc('recurring', id), data);
-    else await addDoc(userCol('recurring'), { ...data, createdAt: serverTimestamp() });
+    const route = $('#recurringRoute')?.value || 'wallet';
+    let walletId = null, cardId = null;
+    if (route === 'card') {
+      if (type !== 'expense') throw new Error('Cartão aceita apenas despesas recorrentes');
+      const card = cardById($('#recurringCardId')?.value);
+      if (!card || card.active === false || !walletById(card.paymentWalletId)) throw new Error('Selecione um cartão ativo com carteira pagadora');
+      cardId = card.id;
+      walletId = card.paymentWalletId;
+      const safeStart = recurringRouteStart(dayOfMonth);
+      if (startDate < safeStart) startDate = safeStart;
+    } else if (route === 'wallet') {
+      walletId = $('#recurringWalletId')?.value || null;
+      if (walletsCache.some(item => item.active !== false) && !walletId) throw new Error('Selecione a carteira da recorrência');
+    } else if (walletsCache.some(item => item.active !== false) || cardsCache.some(item => item.active !== false)) {
+      throw new Error('Vincule a recorrência a uma carteira ou cartão');
+    }
+    const previous = id ? recurringCache.find(item => item.id === id) : null;
+    const previousRoute = previous?.cardId ? 'card' : previous?.walletId ? 'wallet' : 'none';
+    if (id && previousRoute !== route) {
+      const safeStart = recurringRouteStart(dayOfMonth);
+      if (startDate < safeStart) startDate = safeStart;
+    }
+    const data = { name, type, amount, category, description: name, dayOfMonth, startDate, endDate, active, walletId, cardId, updatedAt: serverTimestamp() };
+    if (id) {
+      await removeRecurringCardSchedules(id);
+      await updateDoc(userDoc('recurring', id), data);
+    } else await addDoc(userCol('recurring'), { ...data, createdAt: serverTimestamp() });
     $('#recurringDialog').close();
     await loadAll();
   }, 'Recorrência salva');
@@ -1700,6 +1854,7 @@ document.addEventListener('click', async event => {
   if (target.dataset.toggleCard) {
     const card = cardById(target.dataset.toggleCard);
     if (!card) return;
+    if (card.active !== false && recurringCache.some(item => item.active && item.cardId === card.id)) return toast('Altere primeiro as recorrências vinculadas a este cartão.');
     await runAction(target, async () => { await updateDoc(userDoc('cards', card.id), { active:card.active === false, updatedAt:serverTimestamp() }); await loadAll(); }, card.active === false ? 'Cartão reativado' : 'Cartão arquivado');
     return;
   }
@@ -1726,7 +1881,7 @@ document.addEventListener('click', async event => {
     }, 'Lançamento excluído');
   }
   if (target.dataset.deletePosition && confirm('Excluir esta posição?')) await runAction(target, async () => { await deleteDoc(userDoc('positions', target.dataset.deletePosition)); await loadAll(); }, 'Posição excluída');
-  if (target.dataset.delRec && confirm('Excluir esta recorrência? Os lançamentos já realizados permanecerão no histórico.')) await runAction(target, async () => { await deleteDoc(userDoc('recurring', target.dataset.delRec)); await loadAll(); }, 'Recorrência excluída');
+  if (target.dataset.delRec && confirm('Excluir esta recorrência? Os lançamentos já realizados permanecerão no histórico.')) await runAction(target, async () => { await removeRecurringCardSchedules(target.dataset.delRec); await deleteDoc(userDoc('recurring', target.dataset.delRec)); await loadAll(); }, 'Recorrência excluída');
   if (target.dataset.delSch && confirm('Excluir esta conta agendada? Os lançamentos já realizados permanecerão no histórico.')) await runAction(target, async () => { await deleteDoc(userDoc('scheduled', target.dataset.delSch)); await loadAll(); }, 'Agendamento excluído');
 });
 
@@ -1767,7 +1922,7 @@ function exportExcel() {
     sheetXml('Carteiras',['Instituição','Nome','Tipo','Saldo inicial','Saldo atual','Status'],walletRows),
     sheetXml('Cartões',['Instituição','Nome','Limite','Em aberto','Próxima fatura','Limite disponível','Fechamento','Vencimento','Carteira pagadora','Status'],cardRows),
     sheetXml('Patrimônio',['Tipo','Nome','Valor atual','Composição','Instituição','Valor original','Parcela','Total parcelas','Pagas','Juros a.a.','Vencimento','Observações'],positionRows),
-    sheetXml('Recorrentes',['Nome','Tipo','Categoria','Valor','Dia','Início','Fim','Ativa'],recurringCache.map(r => [r.name,r.type,r.category,safeNumber(r.amount),r.dayOfMonth,r.startDate,r.endDate || '',r.active ? 'Sim' : 'Não'])),
+    sheetXml('Recorrentes',['Nome','Tipo','Categoria','Valor','Dia','Início','Fim','Ativa','Forma de pagamento','Carteira','Cartão'],recurringCache.map(r => [r.name,r.type,r.category,safeNumber(r.amount),r.dayOfMonth,r.startDate,r.endDate || '',r.active ? 'Sim' : 'Não',r.cardId ? 'Cartão' : r.walletId ? 'Carteira' : 'Sem vínculo',walletById(r.walletId)?.name || '',cardById(r.cardId)?.name || ''])),
     sheetXml('Agendadas',['Nome','Tipo','Categoria','Valor','Vencimento','Frequência','Status'],scheduledCache.map(s => [s.name,s.type,s.category,safeNumber(s.amount),s.dueDate,s.frequency,s.status])),
     sheetXml('Metas mensais',['Mês','Meta de aporte','Renda do mês','Meta de gasto mensal (60%)'],goalRows),
     sheetXml(`Ano ${selectedYear}`,['Mês','Receitas','Gastos','Meta gasto 60%','Aportes brutos','Resgates','Aporte líquido','Saldo','Taxa de aporte (%)'],annual)
