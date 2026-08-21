@@ -1,0 +1,216 @@
+name: Patch recurring card reconciliation
+
+on:
+  push:
+    branches:
+      - fix/recurring-card-reconciliation
+    paths:
+      - .github/workflows/patch-recurring-card-reconciliation.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/recurring-card-reconciliation
+
+      - name: Apply targeted reconciliation patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('app.js')
+          text = path.read_text()
+
+          old = '''async function removeRecurringCardSchedules(recurringId) {
+            const prefix = `rec_card_${recurringId}_`;
+            for (const item of scheduledCache.filter(row => String(row.id || '').startsWith(prefix) && row.status === 'active')) {
+              await deleteDoc(userDoc('scheduled', item.id));
+            }
+          }
+          function recurringRouteStart(dayOfMonth) {'''
+          new = '''async function removeRecurringCardSchedules(recurringId, { preserveIncurred = false } = {}) {
+            const prefix = `rec_card_${recurringId}_`;
+            const today = ymd(new Date());
+            for (const item of scheduledCache.filter(row => String(row.id || '').startsWith(prefix) && row.status === 'active')) {
+              if (preserveIncurred && item.purchaseDate && String(item.purchaseDate) <= today) continue;
+              await deleteDoc(userDoc('scheduled', item.id));
+            }
+          }
+          function recurringForMaterializedTransaction(tx, recurringById) {
+            if (tx?.sourceType === 'recurring' && tx.sourceId) return recurringById.get(tx.sourceId) || null;
+            if (tx?.recurring === true && !tx.sourceType) return recurringById.get(`legacy_${tx.id}`) || null;
+            return null;
+          }
+          function recurringCardInvoiceForTransaction(recurring, tx, card) {
+            const purchaseDate = tx.purchaseDate || tx.date;
+            if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(String(purchaseDate || ''))) return null;
+            const invoice = cardInstallmentSchedule({
+              amount:safeNumber(tx.amount), installments:1, purchaseDate,
+              closingDay:card.closingDay, dueDay:card.dueDay
+            })[0];
+            if (!invoice) return null;
+            const scheduledId = recurringCardScheduleId(recurring.id, purchaseDate);
+            return scheduledId ? { purchaseDate, scheduledId, invoice } : null;
+          }
+          async function reconcileRecurringCardRoutes() {
+            const recurringById = new Map(recurringCache.map(item => [item.id, item]));
+            const today = ymd(new Date());
+            let changed = false;
+
+            for (const tx of txCache) {
+              const recurring = recurringForMaterializedTransaction(tx, recurringById);
+              if (!recurring || tx.type !== 'expense') continue;
+              const purchaseDate = tx.purchaseDate || tx.date;
+              const scheduledId = recurringCardScheduleId(recurring.id, purchaseDate);
+              if (!scheduledId) continue;
+              const posted = txCache.some(row => row.sourceType === 'scheduled' && row.sourceId === scheduledId);
+              const persisted = scheduledCache.find(row => row.id === scheduledId);
+              const settled = posted || persisted?.status === 'posted';
+              if (settled) continue;
+
+              if (recurring.cardId) {
+                const card = cardById(recurring.cardId);
+                if (!card || card.active === false || recurring.type !== 'expense') continue;
+                const plan = recurringCardInvoiceForTransaction(recurring, tx, card);
+                if (!plan) continue;
+                const migratedAudit = tx.archived === true && !!tx.cardId && !!tx.purchaseDate;
+                if (!migratedAudit && plan.invoice.date < today) continue;
+
+                const child = {
+                  name:`${tx.description || recurring.name || recurring.category} · fatura`,
+                  type:'expense', amount:plan.invoice.amount,
+                  category:tx.category || recurring.category,
+                  description:tx.description || recurring.name || recurring.description || '',
+                  dueDate:plan.invoice.date, frequency:'once', status:'active',
+                  walletId:card.paymentWalletId, cardId:card.id, purchaseDate:plan.purchaseDate,
+                  installmentGroupId:null, installmentNumber:null, installmentTotal:null,
+                  updatedAt:serverTimestamp()
+                };
+                if (persisted) await updateDoc(userDoc('scheduled', plan.scheduledId), child);
+                else await setDoc(userDoc('scheduled', plan.scheduledId), { ...child, createdAt:serverTimestamp() });
+
+                const patch = {};
+                if (tx.archived !== true) patch.archived = true;
+                if (tx.walletId != null) patch.walletId = null;
+                if (tx.cardId !== card.id) patch.cardId = card.id;
+                if (tx.purchaseDate !== plan.purchaseDate) patch.purchaseDate = plan.purchaseDate;
+                if (Object.keys(patch).length) await updateDoc(userDoc('transactions', tx.id), patch);
+                changed = true;
+                continue;
+              }
+
+              if (tx.archived === true && tx.cardId && tx.purchaseDate) {
+                if (persisted?.status === 'active') await deleteDoc(userDoc('scheduled', persisted.id));
+                await updateDoc(userDoc('transactions', tx.id), {
+                  archived:false,
+                  walletId:recurring.walletId || null,
+                  cardId:null,
+                  purchaseDate:null
+                });
+                changed = true;
+              }
+            }
+            return changed;
+          }
+          function recurringRouteStart(dayOfMonth) {'''
+          if old not in text:
+              raise SystemExit('anchor removeRecurringCardSchedules not found')
+          text = text.replace(old, new, 1)
+
+          old = '''  for (const tx of txCache) {
+            const source = tx.sourceType === 'recurring'\n'''
+          new = '''  for (const tx of txCache) {
+            if (isArchivedTransaction(tx)) continue;
+            const source = tx.sourceType === 'recurring'\n'''
+          if old not in text:
+              raise SystemExit('anchor repairAutomationRoutingMetadata not found')
+          text = text.replace(old, new, 1)
+
+          old = '''    const repaired = await repairLegacyRecurringStartDates();
+            const walletAssignmentsRepaired = await repairRecurringWalletAssignments();
+            if (repaired || walletAssignmentsRepaired) recurringCache = await loadCollection('recurring','createdAt','desc');
+            await processAutomations();'''
+          new = '''    const repaired = await repairLegacyRecurringStartDates();
+            const walletAssignmentsRepaired = await repairRecurringWalletAssignments();
+            if (repaired || walletAssignmentsRepaired) recurringCache = await loadCollection('recurring','createdAt','desc');
+            const recurringCardRoutingRepaired = await reconcileRecurringCardRoutes();
+            if (recurringCardRoutingRepaired) {
+              [txCache, scheduledCache] = await Promise.all([
+                loadCollection('transactions','date','desc'),
+                loadCollection('scheduled','dueDate','asc')
+              ]);
+            }
+            await processAutomations();'''
+          if old not in text:
+              raise SystemExit('anchor loadAll not found')
+          text = text.replace(old, new, 1)
+
+          old = '''    if (id) {
+              await removeRecurringCardSchedules(id);
+              await updateDoc(userDoc('recurring', id), data);
+            } else await addDoc(userCol('recurring'), { ...data, createdAt: serverTimestamp() });'''
+          new = '''    if (id) {
+              const preserveIncurred = !!previous?.cardId && previous.cardId === cardId;
+              await removeRecurringCardSchedules(id, { preserveIncurred });
+              await updateDoc(userDoc('recurring', id), data);
+            } else await addDoc(userCol('recurring'), { ...data, createdAt: serverTimestamp() });'''
+          if old not in text:
+              raise SystemExit('anchor recurring edit not found')
+          text = text.replace(old, new, 1)
+
+          old = '''  if (target.dataset.delRec && confirm('Excluir esta recorrência? Os lançamentos já realizados permanecerão no histórico.')) await runAction(target, async () => { await removeRecurringCardSchedules(target.dataset.delRec); await deleteDoc(userDoc('recurring', target.dataset.delRec)); await loadAll(); }, 'Recorrência excluída');'''
+          new = '''  if (target.dataset.delRec && confirm('Excluir esta recorrência? Os lançamentos já realizados e cobranças de cartão já incorridas permanecerão no histórico.')) await runAction(target, async () => { await deleteDoc(userDoc('recurring', target.dataset.delRec)); await loadAll(); }, 'Recorrência excluída');'''
+          if old not in text:
+              raise SystemExit('anchor recurring delete not found')
+          text = text.replace(old, new, 1)
+
+          old = '''    const metrics = date ? monthMetrics(txCache, date, recurringCache) : { income: 0 };'''
+          new = '''    const metrics = date ? metricsForMonth(date) : { income: 0 };'''
+          if old not in text:
+              raise SystemExit('anchor export goals not found')
+          text = text.replace(old, new, 1)
+
+          path.write_text(text)
+
+          sw = Path('sw.js')
+          sw_text = sw.read_text()
+          if "const CACHE='meu-patrimonio-v47';" not in sw_text:
+              raise SystemExit('service worker cache anchor not found')
+          sw.write_text(sw_text.replace("const CACHE='meu-patrimonio-v47';", "const CACHE='meu-patrimonio-v48';", 1))
+          PY
+
+      - name: Validate syntax and finance behavior
+        shell: bash
+        run: |
+          node --check app.js
+          node --check finance-logic.js
+          node --input-type=module <<'NODE'
+          import { cardInstallmentSchedule } from './finance-logic.js';
+          const beforeClose = cardInstallmentSchedule({ amount:100, installments:1, purchaseDate:'2026-08-07', closingDay:28, dueDay:7 });
+          const afterClose = cardInstallmentSchedule({ amount:100, installments:1, purchaseDate:'2026-08-29', closingDay:28, dueDay:7 });
+          if (beforeClose[0]?.date !== '2026-09-07') throw new Error(`before close invoice mismatch: ${beforeClose[0]?.date}`);
+          if (afterClose[0]?.date !== '2026-10-07') throw new Error(`after close invoice mismatch: ${afterClose[0]?.date}`);
+          NODE
+          grep -q "async function reconcileRecurringCardRoutes" app.js
+          grep -q "if (isArchivedTransaction(tx)) continue;" app.js
+          grep -q "meu-patrimonio-v48" sw.js
+          git diff --check
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          if git diff --quiet -- app.js sw.js; then
+            echo 'No changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- app.js sw.js
+          git commit -m 'Corrige recorrências migradas para cartão'
+          git push origin HEAD:fix/recurring-card-reconciliation
